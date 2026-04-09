@@ -6,14 +6,16 @@
 #include <netinet/in.h>  
 #include <arpa/inet.h> //IP->String (inet_ntoa())
 #include "../include/server_tcp.h"
+#include "../include/http.h"
+
+static void handle_connection(int conn_fd);
 
 
 int main(void) {
     int server_fd, conn_fd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
+
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0); //TCP
     if (server_fd < 0) {
@@ -33,6 +35,7 @@ int main(void) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(SERVER_PORT);
+
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("bind");
         exit(EXIT_FAILURE);
@@ -56,13 +59,7 @@ int main(void) {
                ntohs(client_addr.sin_port),
                conn_fd);
 
-        bytes_read = read(conn_fd, buffer, BUFFER_SIZE - 1);
-        if (bytes_read > 0) {
-        buffer[bytes_read] = '\0';
-        printf("Received %zd bytes:\n---\n%s\n---\n", bytes_read, buffer);
-
-        write(conn_fd, buffer, bytes_read); //for now just echo what we recieved
-    }
+        handle_connection(conn_fd);
 
         close(conn_fd);
         printf("Connection closed.\n\n");
@@ -70,4 +67,66 @@ int main(void) {
     }
     close(server_fd);
     return 0;
+
+}
+
+static void handle_connection(int conn_fd) {
+    char raw[BUFFER_SIZE];
+    int total = 0;
+    ssize_t n;
+
+    while (total < (int)sizeof(raw) - 1) {
+        n = read(conn_fd, raw + total, sizeof(raw) - 1 - total);
+        if (n <= 0) break;        
+        total += n;
+        raw[total] = '\0';
+
+        // stop once we have the full headers
+        if (strstr(raw, "\r\n\r\n")) break;
+    }
+
+    if (total == 0) return;
+
+    http_request_t req;
+    if (http_parse(raw, total, &req) < 0) {
+            http_respond_error(conn_fd, "400 Bad Request", "Malformed request.");
+            return;
+    }
+
+    printf("[%s] %s\n", req.method, req.path);
+
+    if (strcmp(req.method, "GET") != 0) { //for now just GET    
+    http_respond_error(conn_fd, "405 Method Not Allowed",
+                           "Only GET is supported.");
+    return;
+    }
+
+    //serve static files
+    char filepath[MAX_PATH_LEN];
+    const char *req_path = req.path;
+
+    if (strcmp(req_path, "/") == 0) {
+        snprintf(filepath, sizeof(filepath), "%s/index.html", STATIC_DIR); //to-do: secure critical path!!!
+    } else {
+        snprintf(filepath, sizeof(filepath), "%s%s", STATIC_DIR, req_path);
+    }
+
+    char *body = NULL;
+    int   body_len = read_file(filepath, &body);
+
+    if (body_len < 0) {
+        http_respond_error(conn_fd, "404 Not Found",
+                           "The requested file was not found!");
+        return;
+    }
+
+    const char *content_type = "text/plain";
+    if (strstr(filepath, ".html")) content_type = "text/html";
+    else if (strstr(filepath, ".css"))  content_type = "text/css";
+    else if (strstr(filepath, ".js"))   content_type = "application/javascript";
+    else if (strstr(filepath, ".json")) content_type = "application/json";
+
+    http_respond(conn_fd, "200 OK", content_type, body, body_len);
+    free(body); 
+
 }
