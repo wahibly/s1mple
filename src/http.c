@@ -5,55 +5,73 @@
 #include "../include/http.h"
 #include "../include/server_tcp.h"
 
-//parse raw hhtp string to http_request_t struct
 int http_parse(const char *raw, int raw_len, http_request_t *req) {
-    (void)raw_len;
     memset(req, 0, sizeof(*req));
 
-    char *buf = strdup(raw); //copy raw
-    if (!buf) return -1;
 
-    char *line = strtok(buf, "\r\n"); //get first line
-    if (!line) { free(buf); return -1; }
+    const char *line_end = strstr(raw, "\r\n");
+    if (!line_end) return -1;
 
-    if (sscanf(line, "%15s %511s %15s",
-        req->method, req->path, req->version) != 3) {
-        free(buf);
+    // Copy just the first line into a temp buffer
+    char first_line[512];
+    int  line_len = (int)(line_end - raw);
+    if (line_len >= (int)sizeof(first_line)) return -1;
+
+    memcpy(first_line, raw, line_len);
+    first_line[line_len] = '\0';
+
+    if (sscanf(first_line, "%15s %511s %15s",
+               req->method, req->path, req->version) != 3) {
         return -1;
     }
 
-    //parse headers: (Name: Value)
-    while ((line = strtok(NULL, "\r\n")) != NULL) {
-        if (strlen(line) == 0) break; 
 
-        if (req->header_count >= MAX_HEADERS) break;
+    const char *cursor = line_end + 2; // skip past first \r\n
 
-        char *colon = strchr(line, ':');
-        if (!colon) continue; 
+    while (cursor < raw + raw_len) {
+        const char *end = strstr(cursor, "\r\n");
+        if (!end) break;
 
-        *colon = '\0';
-        char *name  = line;
-        char *value = colon + 1;
+        int len = (int)(end - cursor);
+        if (len == 0) {
+            cursor = end + 2;
+            break;
+        }
 
-        while (*value == ' ') value++;
+        // parse "Name: Value"
+        if (req->header_count < MAX_HEADERS) {
+            const char *colon = memchr(cursor, ':', len);
+            if (colon) {
+                int name_len  = (int)(colon - cursor);
+                int value_off = 1;
+                while (colon[value_off] == ' ') value_off++;
+                int value_len = len - name_len - value_off;
 
-        strncpy(req->headers[req->header_count].name,
-                name, MAX_HEADER_LEN - 1);
-        strncpy(req->headers[req->header_count].value,
-                value, MAX_HEADER_LEN - 1);
-        req->header_count++;
+                if (name_len  >= MAX_HEADER_LEN) name_len  = MAX_HEADER_LEN - 1;
+                if (value_len >= MAX_HEADER_LEN) value_len = MAX_HEADER_LEN - 1;
+                if (value_len < 0) value_len = 0;
+
+                memcpy(req->headers[req->header_count].name,
+                       cursor, name_len);
+                req->headers[req->header_count].name[name_len] = '\0';
+
+                memcpy(req->headers[req->header_count].value,
+                       colon + value_off, value_len);
+                req->headers[req->header_count].value[value_len] = '\0';
+
+                req->header_count++;
+            }
+        }
+
+        cursor = end + 2;
     }
-    //locate body -> start after \r\b\r\n
-    const char *body_start = strstr(raw, "\r\n\r\n");
-    if (body_start) {
-        req->body = (char *)(body_start + 4);
-        req->body_len = (int)(raw + raw_len - req->body);
-        if (req->body_len < 0) req->body_len = 0;
-    }
 
-    free(buf);
+
+    req->body     = (char *)cursor;
+    req->body_len = (int)(raw + raw_len - cursor);
+    if (req->body_len < 0) req->body_len = 0;
+
     return 0;
-
 }
 
 //http response
