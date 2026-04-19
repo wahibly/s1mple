@@ -7,6 +7,8 @@
 #include <arpa/inet.h> //IP->String (inet_ntoa())
 #include "../include/server_tcp.h"
 #include "../include/http.h"
+#include "../include/router.h"
+
 
 static void handle_connection(int conn_fd);
 
@@ -99,6 +101,10 @@ static void handle_connection(int conn_fd) {
     http_respond_error(conn_fd, "405 Method Not Allowed",
                            "Only GET is supported.");
     return;
+    }
+
+    if (router_dispatch(conn_fd, &req, routes)) {
+        return;
     }
 
     //serve static files
