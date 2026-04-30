@@ -8,9 +8,25 @@
 #include "../include/server_tcp.h"
 #include "../include/http.h"
 #include "../include/router.h"
+#include <pthread.h>
 
 
 static void handle_connection(int conn_fd);
+
+typedef struct {
+    int conn_fd;
+} thread_args_t;
+
+static void *connection_thread(void *arg) {
+    thread_args_t *args = (thread_args_t *)arg;
+    int conn_fd = args->conn_fd;
+    free(args);  
+
+    handle_connection(conn_fd);
+    close(conn_fd);
+
+    return NULL;
+}
 
 
 int main(void) {
@@ -61,9 +77,19 @@ int main(void) {
                ntohs(client_addr.sin_port),
                conn_fd);
 
-        handle_connection(conn_fd);
+        thread_args_t *args = malloc(sizeof(thread_args_t));
+        if (!args) { close(conn_fd); continue; }
+        args->conn_fd = conn_fd;
 
-        close(conn_fd);
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, connection_thread, args) != 0) {
+            perror("pthread_create");
+            free(args);
+            close(conn_fd);
+            continue;
+        }
+
+        pthread_detach(thread);
         printf("Connection closed.\n\n");
 
     }
