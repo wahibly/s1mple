@@ -1,7 +1,7 @@
 # Makefile for s1mple
 
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Iinclude
+CFLAGS  = -Wall -Wextra -Iinclude -pthread
 SRCS    = src/main.c src/http.c src/router.c
 TARGET  = s1mple
 
