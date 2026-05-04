@@ -25,7 +25,7 @@ typedef struct {
 
 int http_parse(const char *raw ,int raw_len, http_request_t *req);
 
-void http_response(int conn_fd,
+void http_respond(int conn_fd,
                    const char *status_text,
                    const char *content_type,
                    const char *body,
