@@ -4,6 +4,8 @@
 #include "../include/router.h"
 #include "../include/http.h"
 #include "../include/server_tcp.h"
+#include "../include/process.h"
+#include <sys/stat.h>
 
 static void handler_home(int conn_fd, http_request_t *req) {
     (void)req;
@@ -44,10 +46,45 @@ static void handler_about(int conn_fd, http_request_t *req) {
                  body, (int)strlen(body));
 }
 
+static void handler_run_python(int conn_fd, http_request_t *req) {
+    (void)req;
+    char *const argv[] = {"python3", "apps/messi.py", NULL};
+    char *output = NULL;
+
+    int len = process_exec_capture(argv, &output);
+    if (len < 0){
+        http_respond_error(conn_fd, "500 Internal Server Error",
+                           "Failed to execute script.");
+        return;   
+    }
+
+    http_respond(conn_fd, "200 OK", "text/html", output, len);
+    free(output);
+}
+
+static void handler_run_node(int conn_fd, http_request_t *req) {
+    (void)req;
+    char *const argv[] = {"node", "apps/messi.js", NULL};
+    char *output = NULL;
+
+    int len = process_exec_capture(argv, &output);
+    if (len < 0){
+        http_respond_error(conn_fd, "500 Internal Server Error",
+                           "Failed to execute script.");
+        return;   
+    }
+
+    http_respond(conn_fd, "200 OK", "text/html", output, len);
+    free(output);
+}
+
 route_t routes[] = {
     { "/", handler_home},
     { "/api/status", handler_api_status},
     { "/about", handler_about},
+    { "/run/messi.py", handler_run_python},
+    { "/run/messi.js", handler_run_node},
+
     { NULL, NULL}
 };
 
