@@ -9,6 +9,7 @@
 #include "../include/http.h"
 #include "../include/router.h"
 #include <pthread.h>
+#include "../include/registry.h"
 
 
 static void handle_connection(int conn_fd);
@@ -65,6 +66,7 @@ int main(void) {
     printf("Server listening on port %d...\n", SERVER_PORT);
     printf("Connect with: nc localhost %d\n\n", SERVER_PORT); //nc: Netcat, a command-line tool used to create TCP/UDP connections
 
+    registry_init();
 
     while(1){
         conn_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
