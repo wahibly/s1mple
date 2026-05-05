@@ -7,6 +7,7 @@
 #include "../include/process.h"
 #include "../include/registry.h"
 #include <sys/stat.h>
+#include <unistd.h>
 
 static void handler_home(int conn_fd, http_request_t *req) {
     (void)req;
@@ -95,9 +96,16 @@ static void handler_deploy(int conn_fd, http_request_t *req) {
         return;
     }
 
+
     //build filepath
     char filepath[256];
     snprintf(filepath, sizeof(filepath), "apps/%s", app_name);
+
+    if (access(filepath, F_OK) != 0) {
+        http_respond_error(conn_fd, "404 Not Found",
+                           "App file not found in apps/ directory.");
+        return;
+    }
 
     app_entry_t *entry = registry_deploy(app_name, filepath);
     if (!entry) {
