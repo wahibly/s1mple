@@ -5,6 +5,7 @@
 #include "../include/http.h"
 #include "../include/server_tcp.h"
 #include "../include/process.h"
+#include "../include/registry.h"
 #include <sys/stat.h>
 
 static void handler_home(int conn_fd, http_request_t *req) {
@@ -78,21 +79,128 @@ static void handler_run_node(int conn_fd, http_request_t *req) {
     free(output);
 }
 
+
+//GET /deploy?app=messi_serevr.py
+static void handler_deploy(int conn_fd, http_request_t *req) {
+
+    const char *query = strchr(req->path, '?');
+    if (!query) {
+        http_respond_error(conn_fd, "400 Bad Request","Missing query param: ?app=filename");
+        return;
+    }
+
+    char app_name[MAX_APP_NAME];
+    if (sscanf(query, "?app=%63s", app_name) != 1) {
+        http_respond_error(conn_fd, "400 Bad Request", "Invalid app parameter.");
+        return;
+    }
+
+    //build filepath
+    char filepath[256];
+    snprintf(filepath, sizeof(filepath), "apps/%s", app_name);
+
+    app_entry_t *entry = registry_deploy(app_name, filepath);
+    if (!entry) {
+        http_respond_error(conn_fd, "500 Internal Server Error",
+                           "Deployment failed. Check server logs.");
+        return;      
+    }
+
+    usleep(500000);
+
+    char body[512];
+    int  body_len = snprintf(body, sizeof(body),
+        "{\n"
+        "  \"status\": \"deployed\",\n"
+        "  \"name\": \"%s\",\n"
+        "  \"prefix\": \"%s\",\n"
+        "  \"port\": %d,\n"
+        "  \"pid\": %d\n"
+        "}",
+        entry->name, entry->prefix, entry->port, entry->pid);
+
+    http_respond(conn_fd, "200 OK", "application/json", body, body_len);
+
+
+}
+
+static void handler_undeploy(int conn_fd, http_request_t *req) {
+    const char *query = strchr(req->path, '?');
+    if (!query) {
+        http_respond_error(conn_fd, "400 Bad Request",
+                           "Missing query param: ?app=filename");
+        return;
+    }
+
+    char app_name[MAX_APP_NAME];
+    if (sscanf(query, "?app=%63s", app_name) != 1) {
+        http_respond_error(conn_fd, "400 Bad Request",
+                           "Invalid app parameter.");
+        return;
+    }
+
+    if (registry_undeploy(app_name) < 0) {
+        http_respond_error(conn_fd, "404 Not Found", "App not found.");
+        return;
+    }
+
+    const char *body = "{\"status\": \"undeployed\"}";
+    http_respond(conn_fd, "200 OK", "application/json",body, (int)strlen(body));
+}
+
+
+static void handler_api_apps(int conn_fd, http_request_t *req) {
+    (void)req;
+
+    app_entry_t apps[MAX_APPS];
+    int count = 0;
+    registry_list(apps, &count);
+
+    char body[4096];
+    int  pos = 0;
+    pos += snprintf(body + pos, sizeof(body) - pos, "{\n  \"apps\": [\n");
+
+    for (int i = 0; i < count; i++) {
+        pos += snprintf(body + pos, sizeof(body) - pos,
+            "    {\"name\": \"%s\", \"prefix\": \"%s\","
+            " \"port\": %d, \"pid\": %d}%s\n",
+            apps[i].name, apps[i].prefix,
+            apps[i].port, apps[i].pid,
+            i < count - 1 ? "," : "");
+    }
+
+    pos += snprintf(body + pos, sizeof(body) - pos,
+                    "  ],\n  \"count\": %d\n}", count);
+
+    http_respond(conn_fd, "200 OK", "application/json", body, pos);   
+}
+
+
+
+
 route_t routes[] = {
     { "/", handler_home},
     { "/api/status", handler_api_status},
+    {"/api/apps", handler_api_apps},
     { "/about", handler_about},
     { "/run/messi.py", handler_run_python},
     { "/run/messi.js", handler_run_node},
+    {"/deploy", handler_deploy},
+    {"/undeploy", handler_undeploy},
 
     { NULL, NULL}
 };
 
 int router_dispatch(int conn_fd, http_request_t *req, route_t *table) {
 
-    for (int i = 0; table[i].path != NULL; i++) {
+    char path_only[MAX_PATH_LEN];
+    strncpy(path_only, req->path, MAX_PATH_LEN - 1);
+    char *q = strchr(path_only, '?');
+    if (q) *q = '\0'; // null-terminate at the '?'
 
-        if (strcmp(req->path, table[i].path) == 0) {
+    for (int i = 0; table[i].path != NULL; i++) {
+        if (strcmp(path_only, table[i].path) == 0) {
+            printf("[route] matched '%s'\n", table[i].path);
             table[i].handler(conn_fd, req);
             return 1;
         }
