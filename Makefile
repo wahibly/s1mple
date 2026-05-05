@@ -2,7 +2,7 @@
 
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Iinclude -pthread
-SRCS    = src/main.c src/http.c src/router.c src/process.c
+SRCS    = src/main.c src/http.c src/router.c src/process.c src/registry.c
 TARGET  = s1mple
 
 all: $(TARGET)
