@@ -10,22 +10,26 @@
 #include "../include/router.h"
 #include <pthread.h>
 #include "../include/registry.h"
+#include "../include/proxy.h"
 
 
-static void handle_connection(int conn_fd);
+
+static void handle_connection(int conn_fd, const char *client_ip);
 
 typedef struct {
     int conn_fd;
+    char client_ip[INET_ADDRSTRLEN];
 } thread_args_t;
 
 static void *connection_thread(void *arg) {
     thread_args_t *args = (thread_args_t *)arg;
-    int conn_fd = args->conn_fd;
-    free(args);  
+    int  conn_fd   = args->conn_fd;
+    char client_ip[INET_ADDRSTRLEN];
+    strncpy(client_ip, args->client_ip, INET_ADDRSTRLEN - 1);
+    free(args);
 
-    handle_connection(conn_fd);
+    handle_connection(conn_fd, client_ip);
     close(conn_fd);
-
     return NULL;
 }
 
@@ -74,14 +78,20 @@ int main(void) {
             perror("accept");
             continue; //not kill server en cas bad accept
         }
+
+        char client_ip[INET_ADDRSTRLEN];
+        strncpy(client_ip, inet_ntoa(client_addr.sin_addr), INET_ADDRSTRLEN - 1);
+
         printf("New connection from %s:%d (fd=%d)\n",
-               inet_ntoa(client_addr.sin_addr),
+               client_ip,
                ntohs(client_addr.sin_port),
                conn_fd);
 
         thread_args_t *args = malloc(sizeof(thread_args_t));
         if (!args) { close(conn_fd); continue; }
         args->conn_fd = conn_fd;
+
+        strncpy(args->client_ip, client_ip, INET_ADDRSTRLEN - 1);
 
         pthread_t thread;
         if (pthread_create(&thread, NULL, connection_thread, args) != 0) {
@@ -100,7 +110,7 @@ int main(void) {
 
 }
 
-static void handle_connection(int conn_fd) {
+static void handle_connection(int conn_fd, const char *client_ip) {
     char raw[BUFFER_SIZE];
     int total = 0;
     ssize_t n;
@@ -126,13 +136,21 @@ static void handle_connection(int conn_fd) {
     printf("[%s] %s\n", req.method, req.path);
 
     if (strcmp(req.method, "GET") != 0) { //for now just GET    
-    http_respond_error(conn_fd, "405 Method Not Allowed",
+        http_respond_error(conn_fd, "405 Method Not Allowed",
                            "Only GET is supported.");
-    return;
+        return;
     }
 
     if (router_dispatch(conn_fd, &req, routes)) {
         return;
+    }
+
+    //check if pth start with a known app
+    app_entry_t *app = registry_find_by_prefix(req.path);
+    if (app) {
+            printf("[proxy] routing %s -> %s (port %d)\n", req.path, app->name, app->port);
+            proxy_forward(conn_fd, &req, app->port, client_ip);
+            return;
     }
 
     //serve static files
