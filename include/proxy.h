@@ -1,0 +1,12 @@
+#ifndef PROXY_H
+#define PROXY_H
+
+#include "http.h"
+
+
+int proxy_forward(int conn_fd,
+                  http_request_t *req,
+                  int backend_port,
+                  const char *client_ip);
+
+#endif
