@@ -11,6 +11,8 @@
 #include <pthread.h>
 #include "../include/registry.h"
 #include "../include/proxy.h"
+#include "../include/logger.h"
+
 
 
 
@@ -67,8 +69,9 @@ int main(void) {
         perror("listern");
     }
 
-    printf("Server listening on port %d...\n", SERVER_PORT);
-    printf("Connect with: nc localhost %d\n\n", SERVER_PORT); //nc: Netcat, a command-line tool used to create TCP/UDP connections
+    
+    logger_init("s1mple.log", LOG_DEBUG);
+    log_info("server", "s1mple listening on http://localhost:%d", SERVER_PORT);
 
     registry_init();
 
@@ -82,10 +85,7 @@ int main(void) {
         char client_ip[INET_ADDRSTRLEN];
         strncpy(client_ip, inet_ntoa(client_addr.sin_addr), INET_ADDRSTRLEN - 1);
 
-        printf("New connection from %s:%d (fd=%d)\n",
-               client_ip,
-               ntohs(client_addr.sin_port),
-               conn_fd);
+        log_info("server", "connection from %s:%d", client_ip, ntohs(client_addr.sin_port));
 
         thread_args_t *args = malloc(sizeof(thread_args_t));
         if (!args) { close(conn_fd); continue; }
@@ -95,14 +95,13 @@ int main(void) {
 
         pthread_t thread;
         if (pthread_create(&thread, NULL, connection_thread, args) != 0) {
-            perror("pthread_create");
+            log_error("server", "pthread_create failed");
             free(args);
             close(conn_fd);
             continue;
         }
 
         pthread_detach(thread);
-        printf("Connection closed.\n\n");
 
     }
     close(server_fd);
@@ -129,13 +128,16 @@ static void handle_connection(int conn_fd, const char *client_ip) {
 
     http_request_t req;
     if (http_parse(raw, total, &req) < 0) {
+            log_warn("server", "malformed request from client");
             http_respond_error(conn_fd, "400 Bad Request", "Malformed request.");
             return;
     }
 
     printf("[%s] %s\n", req.method, req.path);
 
-    if (strcmp(req.method, "GET") != 0) { //for now just GET    
+    if (strcmp(req.method, "GET") != 0) { //for now just GET
+        
+        log_warn("server", "method not allowed: %s", req.method);
         http_respond_error(conn_fd, "405 Method Not Allowed",
                            "Only GET is supported.");
         return;
@@ -148,7 +150,7 @@ static void handle_connection(int conn_fd, const char *client_ip) {
     //check if pth start with a known app
     app_entry_t *app = registry_find_by_prefix(req.path);
     if (app) {
-            printf("[proxy] routing %s -> %s (port %d)\n", req.path, app->name, app->port);
+            log_info("proxy", "routing %s -> %s (port %d)", req.path, app->name, app->port);
             proxy_forward(conn_fd, &req, app->port, client_ip);
             return;
     }
@@ -167,6 +169,7 @@ static void handle_connection(int conn_fd, const char *client_ip) {
     int   body_len = read_file(filepath, &body);
 
     if (body_len < 0) {
+        log_warn("server", "404 not found: %s", filepath);
         http_respond_error(conn_fd, "404 Not Found",
                            "The requested file was not found!");
         return;

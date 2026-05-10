@@ -8,6 +8,7 @@
 #include "../include/registry.h"
 #include <sys/stat.h>
 #include <unistd.h>
+#include "logger.h"
 
 static void handler_home(int conn_fd, http_request_t *req) {
     (void)req;
@@ -16,6 +17,7 @@ static void handler_home(int conn_fd, http_request_t *req) {
     int   body_len = read_file(STATIC_DIR "/index.html", &body);
 
     if (body_len < 0) {
+        log_error("router", "could not read static/index.html");
         http_respond_error(conn_fd, "500 Internal Server Error",
                            "Could not read index.html.");
         return;
@@ -128,6 +130,7 @@ static void handler_deploy(int conn_fd, http_request_t *req) {
         entry->name, entry->prefix, entry->port, entry->pid);
 
     http_respond(conn_fd, "200 OK", "application/json", body, body_len);
+    log_info("router", "deploy request for '%s'", app_name);
 
 
 }
@@ -154,6 +157,7 @@ static void handler_undeploy(int conn_fd, http_request_t *req) {
 
     const char *body = "{\"status\": \"undeployed\"}";
     http_respond(conn_fd, "200 OK", "application/json",body, (int)strlen(body));
+    log_info("router", "undeploy request for '%s'", app_name);
 }
 
 
@@ -208,7 +212,7 @@ int router_dispatch(int conn_fd, http_request_t *req, route_t *table) {
 
     for (int i = 0; table[i].path != NULL; i++) {
         if (strcmp(path_only, table[i].path) == 0) {
-            printf("[route] matched '%s'\n", table[i].path);
+            log_debug("router", "matched '%s'", table[i].path);
             table[i].handler(conn_fd, req);
             return 1;
         }

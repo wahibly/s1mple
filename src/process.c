@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include "process.h"
+#include "logger.h"
+
 
 int process_exec_capture(char *const argv[], char **out_buf) {
 
@@ -38,7 +40,7 @@ int process_exec_capture(char *const argv[], char **out_buf) {
 
         execvp(argv[0], argv);
 
-        fprintf(stderr, "execvp failed: %s\n", argv[0]);
+        log_error("process", "execvp failed for '%s'", argv[0]);
         exit(1);
     }
 
@@ -69,8 +71,7 @@ int process_exec_capture(char *const argv[], char **out_buf) {
     waitpid(pid , &status, 0);
 
     if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-        fprintf(stderr, "[process] child exited with code %d\n",
-                WEXITSTATUS(status));
+        log_warn("process", "child exited with code %d", WEXITSTATUS(status));
         // We still return the output it likely contains the error message
     }
 

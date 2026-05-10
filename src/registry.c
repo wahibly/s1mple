@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include "../include/registry.h"
 #include "process.h"
+#include "logger.h"
 
 app_registry_t g_registry;
 
@@ -15,7 +16,7 @@ void registry_init(void) {
     g_registry.next_port = BASE_PORT;
 
     pthread_mutex_init(&g_registry.lock, NULL);
-    printf("[registry] initialized. base port: %d\n", BASE_PORT);
+    log_info("registry", "initialized. base port: %d", BASE_PORT);
 }
 
 // exec app in backgournd -> return pid of process or -1 if failed
@@ -55,13 +56,13 @@ static pid_t spawn_app_process(const char *filepath, int port){
             execvp(filepath, argv);
             
         }
-        fprintf(stderr, "[spawn] exec failed for %s\n", filepath);
+        log_error("registry", "exec failed for %s", filepath);
         _exit(1);
         
     }
 
     //parent
-    printf("[registry] spawned '%s' as pid %d on port %d\n", filepath, pid, port);
+    log_info("registry", "spawned '%s' as pid %d on port %d", filepath, pid, port);
 
     return pid;
 }
@@ -72,7 +73,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     if (g_registry.count >= MAX_APPS) {
         pthread_mutex_unlock(&g_registry.lock);
-        fprintf(stderr, "[registry] max apps reached\n");
+        log_error("registry", "max apps reached (%d)", MAX_APPS);
         return NULL;
         
     }
@@ -80,7 +81,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
     for(int i =0; i < MAX_APPS; i++) {
         if (g_registry.apps[i].active && strcmp(g_registry.apps[i].name, name) == 0) {
             pthread_mutex_unlock(&g_registry.lock);
-            fprintf(stderr, "[registry] app '%s' already deployed\n", name);
+            log_warn("registry", "app '%s' already deployed", name);
             return NULL;
         }        
 
@@ -126,7 +127,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     pthread_mutex_unlock(&g_registry.lock);
 
-    printf("[registry] deployed '%s' -> prefix=%s port=%d\n", name, prefix, port);   
+    log_info("registry", "deployed '%s' → prefix=%s port=%d", name, prefix, port);   
 
     return entry;
 }
@@ -175,7 +176,7 @@ int registry_undeploy(const char *name){
 
            waitpid(g_registry.apps[i].pid, NULL, WNOHANG);
 
-           printf("[registry] undeployed '%s' (pid %d)\n", name, g_registry.apps[i].pid);
+           log_info("registry", "undeployed '%s' (pid %d)", name, g_registry.apps[i].pid);
 
            memset(&g_registry.apps[i], 0, sizeof(app_entry_t));
            g_registry.count--;
