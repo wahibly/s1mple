@@ -12,6 +12,7 @@
 #include "../include/registry.h"
 #include "../include/proxy.h"
 #include "../include/logger.h"
+#include "security.h"
 
 
 
@@ -32,6 +33,7 @@ static void *connection_thread(void *arg) {
 
     handle_connection(conn_fd, client_ip);
     close(conn_fd);
+    security_conn_release(client_ip);
     return NULL;
 }
 
@@ -85,6 +87,18 @@ int main(void) {
         char client_ip[INET_ADDRSTRLEN];
         strncpy(client_ip, inet_ntoa(client_addr.sin_addr), INET_ADDRSTRLEN - 1);
 
+        if (!security_conn_allow(client_ip)) {
+            const char *resp =
+                "HTTP/1.1 429 Too Many Requests\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: 23\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+                "Too many connections.\r\n";
+            write(conn_fd, resp, strlen(resp));
+            close(conn_fd);
+            continue;
+        }
         log_info("server", "connection from %s:%d", client_ip, ntohs(client_addr.sin_port));
 
         thread_args_t *args = malloc(sizeof(thread_args_t));
@@ -120,6 +134,11 @@ static void handle_connection(int conn_fd, const char *client_ip) {
         total += n;
         raw[total] = '\0';
 
+        if (!security_request_size_ok(total)) {
+            http_respond_error(conn_fd, "413 Payload Too Large",
+                               "Request exceeds maximum allowed size.");
+            return;
+        }
         // stop once we have the full headers
         if (strstr(raw, "\r\n\r\n")) break;
     }
@@ -163,6 +182,12 @@ static void handle_connection(int conn_fd, const char *client_ip) {
         snprintf(filepath, sizeof(filepath), "%s/index.html", STATIC_DIR); //to-do: secure critical path!!!
     } else {
         snprintf(filepath, sizeof(filepath), "%s%s", STATIC_DIR, req_path);
+    }
+
+
+    if (!security_path_is_safe(filepath, STATIC_DIR)) {
+        http_respond_error(conn_fd, "403 Forbidden", "Access denied.");
+        return;
     }
 
     char *body = NULL;

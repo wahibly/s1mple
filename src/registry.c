@@ -73,7 +73,9 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     if (g_registry.count >= MAX_APPS) {
         pthread_mutex_unlock(&g_registry.lock);
-        log_error("registry", "max apps reached (%d)", MAX_APPS);
+        log_error("registry",
+          "max apps reached (%d) — deploy rejected for '%s'",
+          MAX_APPS, name);
         return NULL;
         
     }
