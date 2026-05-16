@@ -5,14 +5,15 @@
 #include <sys/socket.h> 
 #include <netinet/in.h>  
 #include <arpa/inet.h> //IP->String (inet_ntoa())
-#include "../include/server_tcp.h"
-#include "../include/http.h"
-#include "../include/router.h"
+#include "server_tcp.h"
+#include "http.h"
+#include "router.h"
 #include <pthread.h>
-#include "../include/registry.h"
-#include "../include/proxy.h"
-#include "../include/logger.h"
+#include "registry.h"
+#include "proxy.h"
+#include "logger.h"
 #include "security.h"
+#include "config.h"
 
 
 
@@ -39,6 +40,12 @@ static void *connection_thread(void *arg) {
 
 
 int main(void) {
+    config_load("s1mple.conf");
+    logger_init(g_config.log_file, g_config.log_level);
+    config_print();
+
+    registry_init();
+
     int server_fd, conn_fd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -61,7 +68,7 @@ int main(void) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_port = htons(g_config.port);
 
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("bind");
@@ -72,10 +79,8 @@ int main(void) {
     }
 
     
-    logger_init("s1mple.log", LOG_DEBUG);
-    log_info("server", "s1mple listening on http://localhost:%d", SERVER_PORT);
+    log_info("server", "s1mple listening on http://localhost:%d", g_config.port);
 
-    registry_init();
 
     while(1){
         conn_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
@@ -119,6 +124,7 @@ int main(void) {
 
     }
     close(server_fd);
+    logger_close();
     return 0;
 
 }
@@ -179,13 +185,13 @@ static void handle_connection(int conn_fd, const char *client_ip) {
     const char *req_path = req.path;
 
     if (strcmp(req_path, "/") == 0) {
-        snprintf(filepath, sizeof(filepath), "%s/index.html", STATIC_DIR); //to-do: secure critical path!!!
+        snprintf(filepath, sizeof(filepath), "%s/index.html", g_config.static_dir); //to-do: secure critical path!!!
     } else {
-        snprintf(filepath, sizeof(filepath), "%s%s", STATIC_DIR, req_path);
+        snprintf(filepath, sizeof(filepath), "%s%s",g_config.static_dir, req_path);
     }
 
 
-    if (!security_path_is_safe(filepath, STATIC_DIR)) {
+    if (!security_path_is_safe(filepath, g_config.static_dir)) {
         http_respond_error(conn_fd, "403 Forbidden", "Access denied.");
         return;
     }

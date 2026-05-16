@@ -5,18 +5,20 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include "../include/registry.h"
+#include "registry.h"
 #include "process.h"
 #include "logger.h"
+#include "config.h"
+
 
 app_registry_t g_registry;
 
 void registry_init(void) {
     memset(&g_registry, 0 ,sizeof(g_registry));
-    g_registry.next_port = BASE_PORT;
+    g_registry.next_port = g_config.base_port;
 
     pthread_mutex_init(&g_registry.lock, NULL);
-    log_info("registry", "initialized. base port: %d", BASE_PORT);
+    log_info("registry", "initialized. base port: %d", g_config.base_port);
 }
 
 // exec app in backgournd -> return pid of process or -1 if failed
@@ -71,16 +73,16 @@ static pid_t spawn_app_process(const char *filepath, int port){
 app_entry_t *registry_deploy(const char *name, const char *filepath) {
     pthread_mutex_lock(&g_registry.lock);
 
-    if (g_registry.count >= MAX_APPS) {
+    if (g_registry.count >= g_config.max_apps) {
         pthread_mutex_unlock(&g_registry.lock);
         log_error("registry",
           "max apps reached (%d) — deploy rejected for '%s'",
-          MAX_APPS, name);
+          g_config.max_apps, name);
         return NULL;
         
     }
 
-    for(int i =0; i < MAX_APPS; i++) {
+    for(int i =0; i < g_config.max_apps; i++) {
         if (g_registry.apps[i].active && strcmp(g_registry.apps[i].name, name) == 0) {
             pthread_mutex_unlock(&g_registry.lock);
             log_warn("registry", "app '%s' already deployed", name);
@@ -91,7 +93,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     //find a free slot
     int slot = -1;
-    for (int i=0; i < MAX_APPS; i++){
+    for (int i=0; i < g_config.max_apps; i++){
         if(!g_registry.apps[i].active) {
             slot = i;
             break;
@@ -139,7 +141,7 @@ app_entry_t *registry_find_by_prefix(const char *prefix) {
     pthread_mutex_lock(&g_registry.lock);
 
     app_entry_t *found = NULL;
-    for(int i=0; i < MAX_APPS; i++) {
+    for(int i=0; i < g_config.max_apps; i++) {
         if (g_registry.apps[i].active && 
             strncmp(prefix, g_registry.apps[i].prefix, strlen(g_registry.apps[i].prefix))==0) {
                 found = &g_registry.apps[i];
@@ -155,7 +157,7 @@ void registry_list(app_entry_t *out, int *count){
     pthread_mutex_lock(&g_registry.lock);
 
     *count = 0;
-    for (int i = 0; i < MAX_APPS; i++) {
+    for (int i = 0; i < g_config.max_apps; i++) {
         if (g_registry.apps[i].active) {
             out[*count] = g_registry.apps[i];
             (*count)++;
@@ -168,7 +170,7 @@ void registry_list(app_entry_t *out, int *count){
 int registry_undeploy(const char *name){
     pthread_mutex_lock(&g_registry.lock);
 
-    for (int i=0; i < MAX_APPS; i++) {
+    for (int i=0; i < g_config.max_apps; i++) {
         if(g_registry.apps[i].active &&
            strcmp(g_registry.apps[i].name, name) == 0) {
                 

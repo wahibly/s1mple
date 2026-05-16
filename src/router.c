@@ -1,23 +1,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../include/router.h"
-#include "../include/http.h"
-#include "../include/server_tcp.h"
-#include "../include/process.h"
-#include "../include/registry.h"
+#include "router.h"
+#include "http.h"
+#include "server_tcp.h"
+#include "process.h"
+#include "config.h"
+#include "registry.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #include "logger.h"
 
+
 static void handler_home(int conn_fd, http_request_t *req) {
     (void)req;
+    char filepath[256];
+    snprintf(filepath, sizeof(filepath),
+             "%s/index.html", g_config.static_dir); 
 
-    char *body    = NULL;
-    int   body_len = read_file(STATIC_DIR "/index.html", &body);
+    char *body     = NULL;
+    int   body_len = read_file(filepath, &body);
 
     if (body_len < 0) {
-        log_error("router", "could not read static/index.html");
         http_respond_error(conn_fd, "500 Internal Server Error",
                            "Could not read index.html.");
         return;

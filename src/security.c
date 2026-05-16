@@ -5,6 +5,7 @@
 #include "security.h"
 #include "server_tcp.h"
 #include "logger.h"
+#include "config.h"
 #include <limits.h>
 
 #ifndef PATH_MAX
@@ -39,9 +40,9 @@ int security_conn_allow(const char *ip) {
 
     if (found >= 0) {
         // IP in table
-        if (conn_table[found].count >= MAX_CONN_PER_IP) {
+        if (conn_table[found].count >= g_config.max_connections) {
             log_warn("security", "connection limit hit for IP %s (%d/%d)",
-                     ip, conn_table[found].count, MAX_CONN_PER_IP);
+                     ip, conn_table[found].count, g_config.max_connections);
             allowed = 0;
         } else {
             conn_table[found].count++;
@@ -123,10 +124,10 @@ int security_path_is_safe(const char *filepath, const char *allowed_dir) {
 }
 
 int security_request_size_ok(int size) {
-    if (size > MAX_REQUEST_SIZE) {
+    if (size > g_config.max_request_bytes) {
         log_warn("security",
                  "request too large: %d bytes (max %d) — rejecting",
-                 size, MAX_REQUEST_SIZE);
+                 size, g_config.max_request_bytes);
         return 0;
     }
     return 1;
