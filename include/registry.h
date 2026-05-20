@@ -24,6 +24,7 @@ typedef struct {
     app_entry_t apps[MAX_APPS];
     int count;            // number of active apps
     int next_port;  
+    int next_id;
     pthread_mutex_t lock;         // semaphore to protect concurrent access yo registry
 } app_registry_t;
 

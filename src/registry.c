@@ -16,6 +16,7 @@ app_registry_t g_registry;
 void registry_init(void) {
     memset(&g_registry, 0 ,sizeof(g_registry));
     g_registry.next_port = g_config.base_port;
+    g_registry.next_id = 1;
 
     pthread_mutex_init(&g_registry.lock, NULL);
     log_info("registry", "initialized. base port: %d", g_config.base_port);
@@ -75,8 +76,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     if (g_registry.count >= g_config.max_apps) {
         pthread_mutex_unlock(&g_registry.lock);
-        log_error("registry",
-          "max apps reached (%d) — deploy rejected for '%s'",
+        log_error("registry", "max apps reached (%d) — deploy rejected for '%s'",
           g_config.max_apps, name);
         return NULL;
         
@@ -109,7 +109,7 @@ app_entry_t *registry_deploy(const char *name, const char *filepath) {
 
     //build the url
     char prefix[MAX_PREFIX_LEN];
-    snprintf(prefix, sizeof(prefix), "/app%d", port - BASE_PORT +1);
+    snprintf(prefix, sizeof(prefix), "/app%d", g_registry.next_id++);
 
     pid_t pid = spawn_app_process(filepath, port);
     if(pid < 0) {
