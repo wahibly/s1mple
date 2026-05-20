@@ -23,39 +23,47 @@ static pthread_mutex_t conn_lock = PTHREAD_MUTEX_INITIALIZER;
 int security_conn_allow(const char *ip) {
     pthread_mutex_lock(&conn_lock);
 
-    int  found    = -1;   // index of existing entry for this IP
-    int  empty    = -1;   // index of first empty slot
+    int found = -1;
+    int empty = -1;  
+    int zero  = -1;   // has IP but count is 0 
 
     for (int i = 0; i < MAX_CONN_TRACKED; i++) {
-        if (conn_table[i].count > 0 && strcmp(conn_table[i].ip, ip) == 0) {
+        if (strlen(conn_table[i].ip) > 0 &&
+            strcmp(conn_table[i].ip, ip) == 0) {
             found = i;
             break;
         }
-        if (empty < 0 && conn_table[i].count == 0) {
-            empty = i;
-        }
+        if (strlen(conn_table[i].ip) == 0 && empty < 0) empty = i;
+        if (strlen(conn_table[i].ip) > 0 &&
+            conn_table[i].count == 0    && zero  < 0) zero  = i;
     }
 
     int allowed = 1;
+    int limit   = g_config.max_connections;
 
     if (found >= 0) {
-        // IP in table
-        if (conn_table[found].count >= g_config.max_connections) {
-            log_warn("security", "connection limit hit for IP %s (%d/%d)",
-                     ip, conn_table[found].count, g_config.max_connections);
+        // Known IP
+        if (conn_table[found].count >= limit) {
+            log_warn("security",
+                     "connection limit hit for IP %s (%d/%d)",
+                     ip, conn_table[found].count, limit);
             allowed = 0;
         } else {
             conn_table[found].count++;
-            log_debug("security", "IP %s connections: %d",
-                      ip, conn_table[found].count);
+            log_debug("security", "IP %s connections: %d", ip, conn_table[found].count);
         }
-    } else if (empty >= 0) {
-        // new IP —> use empty slot
-        strncpy(conn_table[empty].ip, ip, INET_ADDRSTRLEN - 1);
-        conn_table[empty].count = 1;
-        log_debug("security", "new IP %s tracked", ip);
     } else {
-        log_warn("security", "connection table full, allowing %s", ip);
+        // New IP -> find a slot
+        int slot = (empty >= 0) ? empty :
+                   (zero  >= 0) ? zero  : -1;
+
+        if (slot >= 0) {
+            strncpy(conn_table[slot].ip, ip, INET_ADDRSTRLEN - 1);
+            conn_table[slot].count = 1;
+            log_debug("security", "new IP %s tracked (slot %d)", ip, slot);
+        } else {
+            log_warn("security", "conn table full, allowing %s", ip);
+        }
     }
 
     pthread_mutex_unlock(&conn_lock);
@@ -67,10 +75,10 @@ void security_conn_release(const char *ip) {
     pthread_mutex_lock(&conn_lock);
 
     for (int i = 0; i < MAX_CONN_TRACKED; i++) {
-        if (conn_table[i].count > 0 && strcmp(conn_table[i].ip, ip) == 0) {
-            conn_table[i].count--;
-            if (conn_table[i].count == 0) {
-                memset(&conn_table[i], 0, sizeof(conn_entry_t));
+        if (strcmp(conn_table[i].ip, ip) == 0) {
+            if (conn_table[i].count > 0) {
+                conn_table[i].count--;
+                log_debug("security", "IP %s released, connections now: %d", ip, conn_table[i].count);
             }
             break;
         }
@@ -78,7 +86,6 @@ void security_conn_release(const char *ip) {
 
     pthread_mutex_unlock(&conn_lock);
 }
-
 
 int security_path_is_safe(const char *filepath, const char *allowed_dir) {
     // Resolve allowed_dir to absolute path 
