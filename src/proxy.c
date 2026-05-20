@@ -5,11 +5,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include "../include/proxy.h"
+#include "proxy.h"
 #include "http.h"
 #include "logger.h"
-#include "../include/server_tcp.h"
-
+#include "server_tcp.h"
+#include <errno.h>
+#include "config.h"
+#include <sys/time.h> 
 
 
 //proxy connect: open tcp connection to localhost:port
@@ -30,6 +32,13 @@ static int proxy_connect(int port) {
         log_error("proxy", "could not connect to backend port %d", port);
         close(sock);
         return -1;
+    }
+
+    struct timeval tv;
+    tv.tv_sec  = g_config.proxy_timeout;
+    tv.tv_usec = 0;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        log_warn("proxy", "could not set read timeout");
     }
     return sock;
 }
@@ -99,6 +108,19 @@ int proxy_forward(int conn_fd, http_request_t *req, int backend_port, const char
             break;
         }
         total_relayed += writen;
+    }
+
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            log_warn("proxy", "backend port %d timed out after %ds", backend_port, g_config.proxy_timeout);
+            if (total_relayed == 0) {
+                http_respond_error(conn_fd, "504 Gateway Timeout",
+                                   "Backend app did not respond in time.");
+            }
+        } else {
+            log_error("proxy", "read from backend failed: %s",
+                      strerror(errno));
+        }
     }
 
     log_info("proxy", "relayed %d bytes to client", total_relayed);

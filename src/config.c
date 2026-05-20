@@ -16,6 +16,7 @@ static void config_set_defaults(void) {
     g_config.max_apps         = 16;
     g_config.base_port        = 5001;
     g_config.log_level        = LOG_DEBUG;
+    g_config.proxy_timeout = 30;
     strncpy(g_config.static_dir, "static",      sizeof(g_config.static_dir) - 1);
     strncpy(g_config.log_file,   "s1mple.log",  sizeof(g_config.log_file)   - 1);
 }
@@ -70,6 +71,9 @@ static void config_apply_pair(const char *key, const char *value) {
 
     } else if (strcmp(key, "base_port") == 0) {
         g_config.base_port = atoi(value);
+
+    }else if (strcmp(key, "proxy_timeout") == 0){
+        g_config.proxy_timeout= atoi(value);
 
     } else {
         fprintf(stderr, "[config] unknown key '%s' — ignored\n", key);
@@ -141,4 +145,5 @@ void config_print(void) {
     log_info("config", "max_request_kb  = %d", g_config.max_request_bytes / 1024);
     log_info("config", "max_apps        = %d", g_config.max_apps);
     log_info("config", "base_port       = %d", g_config.base_port);
+    log_info("config", "proxy_timeout   = %d", g_config.proxy_timeout);
 }

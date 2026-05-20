@@ -16,6 +16,7 @@ typedef struct {
 
     int  max_apps;
     int  base_port;
+    int proxy_timeout;
 } server_config_t;
 
 // Load config from file. Missing keys use defaults.
