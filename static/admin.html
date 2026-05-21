@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>s1mple admin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      background: #161b22;
+      border-bottom: 0.5px solid #30363d;
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      color: #e6edf3;
+    }
+
+    .logo-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #1d9e75;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .stat-pill {
+      font-size: 12px;
+      color: #8b949e;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-pill strong {
+      color: #e6edf3;
+      font-weight: 500;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #1d9e75;
+      display: inline-block;
+    }
+
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 28px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric {
+      background: #161b22;
+      border: 0.5px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .metric-value {
+      font-size: 22px;
+      font-weight: 500;
+      color: #e6edf3;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    .panel {
+      background: #161b22;
+      border: 0.5px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 14px 18px;
+      border-bottom: 0.5px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: #e6edf3;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-title i {
+      font-size: 16px;
+      color: #8b949e;
+    }
+
+    .panel-body {
+      padding: 16px 18px;
+    }
+
+    .deploy-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    select {
+      background: #0d1117;
+      color: #e6edf3;
+      border: 0.5px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      flex: 1;
+      outline: none;
+      cursor: pointer;
+    }
+
+    select:focus { border-color: #388bfd; }
+
+    .btn {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.15s;
+    }
+
+    .btn:hover { opacity: 0.85; }
+
+    .btn-primary {
+      background: #1f6feb;
+      color: #fff;
+    }
+
+    .btn-sm {
+      font-size: 12px;
+      padding: 5px 10px;
+      border-radius: 5px;
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: #f85149;
+      border: 0.5px solid #f85149;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: #8b949e;
+      border: 0.5px solid #30363d;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      padding: 10px 14px;
+      color: #8b949e;
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 0.5px solid #30363d;
+    }
+
+    td {
+      padding: 12px 14px;
+      border-bottom: 0.5px solid #21262d;
+      color: #c9d1d9;
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1c2128; }
+
+    .mono {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 12px;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    .tag-prefix {
+      background: #1a2332;
+      color: #388bfd;
+      border: 0.5px solid #1f3a5c;
+    }
+
+    .tag-running {
+      background: #0d2119;
+      color: #3fb950;
+      border: 0.5px solid #1a4030;
+    }
+
+    .tag-port {
+      background: #1a1a2e;
+      color: #a5a0ff;
+      border: 0.5px solid #2d2a5e;
+    }
+
+    .empty {
+      padding: 32px;
+      text-align: center;
+      color: #484f58;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .empty i { font-size: 28px; color: #30363d; }
+
+    .log-wrap {
+      background: #0d1117;
+      border-radius: 6px;
+      padding: 14px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .log-line {
+      display: flex;
+      gap: 10px;
+      line-height: 1.5;
+    }
+
+    .log-time  { color: #484f58; flex-shrink: 0; }
+    .log-info  { color: #3fb950; flex-shrink: 0; }
+    .log-warn  { color: #d29922; flex-shrink: 0; }
+    .log-error { color: #f85149; flex-shrink: 0; }
+    .log-debug { color: #484f58; flex-shrink: 0; }
+
+    .log-msg-info  { color: #8b949e; }
+    .log-msg-warn  { color: #c9d1d9; }
+    .log-msg-error { color: #c9d1d9; }
+    .log-msg-debug { color: #484f58; }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s;
+      pointer-events: none;
+      z-index: 99;
+    }
+
+    .toast.show { opacity: 1; }
+
+    .toast.ok {
+      background: #0d2119;
+      color: #3fb950;
+      border: 0.5px solid #1a4030;
+    }
+
+    .toast.err {
+      background: #2d0f0f;
+      color: #f85149;
+      border: 0.5px solid #5c1a1a;
+    }
+
+    .refresh-badge {
+      font-size: 11px;
+      color: #484f58;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-dot"></div>
+    s1mple admin
+  </div>
+  <div class="topbar-right">
+    <div class="stat-pill">
+      <span class="live-dot"></span>
+      <span id="t-live">connecting</span>
+    </div>
+    <div class="stat-pill">port <strong id="t-port">—</strong></div>
+    <div class="stat-pill">uptime <strong id="t-uptime">—</strong></div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Metric cards -->
+  <div class="row">
+    <div class="metric">
+      <div class="metric-label">
+        <i class="ti ti-apps"></i> running apps
+      </div>
+      <div class="metric-value" id="m-apps">—</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">
+        <i class="ti ti-clock"></i> uptime
+      </div>
+      <div class="metric-value" id="m-uptime">—</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">
+        <i class="ti ti-server"></i> server port
+      </div>
+      <div class="metric-value" id="m-port">—</div>
+    </div>
+  </div>
+
+  <!-- Deploy panel -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <i class="ti ti-rocket"></i> deploy app
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="deploy-row">
+        <select id="file-select">
+          <option value="">loading files...</option>
+        </select>
+        <button class="btn btn-primary" onclick="deployApp()">
+          <i class="ti ti-upload"></i> deploy
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apps panel -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <i class="ti ti-activity"></i> running apps
+      </div>
+      <div class="refresh-badge">
+        <i class="ti ti-refresh"></i>
+        <span id="refresh-label">refreshing in 5s</span>
+      </div>
+    </div>
+    <div id="apps-wrap">
+      <div class="empty">
+        <i class="ti ti-loader"></i>
+        loading...
+      </div>
+    </div>
+  </div>
+
+  <!-- Log panel -->
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <i class="ti ti-terminal-2"></i> activity log
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="clearLog()">
+        clear
+      </button>
+    </div>
+    <div class="panel-body" style="padding: 12px 14px;">
+      <div class="log-wrap" id="log-wrap"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let countdown = 5;
+  let timer     = null;
+
+  function fmt(s) {
+    if (s < 60)   return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  }
+
+  function toast(msg, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className   = 'toast show ' + type;
+    setTimeout(() => { el.className = 'toast'; }, 2800);
+  }
+
+  function log(msg, level = 'info') {
+    const wrap = document.getElementById('log-wrap');
+    const t    = new Date().toTimeString().slice(0, 8);
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML =
+      `<span class="log-time">${t}</span>` +
+      `<span class="log-${level}">[${level}]</span>` +
+      `<span class="log-msg-${level}">${msg}</span>`;
+    wrap.appendChild(line);
+    wrap.scrollTop = wrap.scrollHeight;
+    while (wrap.children.length > 120) wrap.removeChild(wrap.firstChild);
+  }
+
+  function clearLog() {
+    document.getElementById('log-wrap').innerHTML = '';
+  }
+
+  async function fetchStatus() {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      document.getElementById('t-live').textContent   = 'live';
+      document.getElementById('t-port').textContent   = d.port;
+      document.getElementById('t-uptime').textContent = fmt(d.uptime);
+      document.getElementById('m-apps').textContent   = d.apps_running;
+      document.getElementById('m-uptime').textContent = fmt(d.uptime);
+      document.getElementById('m-port').textContent   = d.port;
+    } catch (e) {
+      document.getElementById('t-live').textContent = 'offline';
+    }
+  }
+
+  async function fetchApps() {
+    try {
+      const r = await fetch('/api/apps');
+      const d = await r.json();
+      renderApps(d.apps, d.count);
+    } catch (e) {
+      log('failed to fetch apps', 'error');
+    }
+  }
+
+  function renderApps(apps, count) {
+    const wrap = document.getElementById('apps-wrap');
+    if (!count) {
+      wrap.innerHTML =
+        '<div class="empty">' +
+        '<i class="ti ti-box-off"></i>' +
+        'no apps deployed yet' +
+        '</div>';
+      return;
+    }
+
+    let h =
+      '<table><thead><tr>' +
+      '<th>name</th><th>prefix</th><th>port</th>' +
+      '<th>pid</th><th>status</th><th></th>' +
+      '</tr></thead><tbody>';
+
+    for (const a of apps) {
+      h +=
+        `<tr>
+          <td class="mono">${a.name}</td>
+          <td><span class="tag tag-prefix">${a.prefix}</span></td>
+          <td><span class="tag tag-port">${a.port}</span></td>
+          <td class="mono" style="color:#8b949e">${a.pid}</td>
+          <td><span class="tag tag-running">● running</span></td>
+          <td style="text-align:right">
+            <button class="btn btn-danger btn-sm"
+              onclick="undeployApp('${a.name}')">
+              <i class="ti ti-trash"></i> undeploy
+            </button>
+          </td>
+        </tr>`;
+    }
+
+    h += '</tbody></table>';
+    wrap.innerHTML = h;
+  }
+
+  async function fetchFiles() {
+    try {
+      const r   = await fetch('/api/files');
+      const d   = await r.json();
+      const sel = document.getElementById('file-select');
+      sel.innerHTML = '';
+
+      if (!d.files.length) {
+        sel.innerHTML = '<option value="">no .py or .js files in apps/</option>';
+        return;
+      }
+
+      for (const f of d.files) {
+        const o   = document.createElement('option');
+        o.value   = f;
+        o.textContent = f;
+        sel.appendChild(o);
+      }
+    } catch (e) {
+      log('failed to fetch file list', 'error');
+    }
+  }
+
+  async function deployApp() {
+    const sel  = document.getElementById('file-select');
+    const name = sel.value;
+
+    if (!name) { toast('select a file first', 'err'); return; }
+
+    log(`deploying ${name}...`, 'info');
+
+    try {
+      const r = await fetch(`/deploy?app=${encodeURIComponent(name)}`);
+      const d = await r.json();
+
+      if (r.ok) {
+        log(`deployed ${name} → ${d.prefix} on port ${d.port}`, 'info');
+        toast(`deployed at ${d.prefix}`);
+        await refresh();
+      } else {
+        log(`deploy failed: ${r.status}`, 'error');
+        toast('deploy failed', 'err');
+      }
+    } catch (e) {
+      log('deploy error: ' + e.message, 'error');
+      toast('error', 'err');
+    }
+  }
+
+  async function undeployApp(name) {
+    if (!confirm(`undeploy ${name}?`)) return;
+
+    log(`undeploying ${name}...`, 'warn');
+
+    try {
+      const r = await fetch(`/undeploy?app=${encodeURIComponent(name)}`);
+
+      if (r.ok) {
+        log(`${name} undeployed`, 'warn');
+        toast(`${name} undeployed`);
+        await refresh();
+      } else {
+        log(`undeploy failed: ${r.status}`, 'error');
+        toast('undeploy failed', 'err');
+      }
+    } catch (e) {
+      log('error: ' + e.message, 'error');
+    }
+  }
+
+  async function refresh() {
+    await Promise.all([fetchStatus(), fetchApps()]);
+  }
+
+  function startCountdown() {
+    countdown = 5;
+    clearInterval(timer);
+    timer = setInterval(async () => {
+      countdown--;
+      document.getElementById('refresh-label').textContent =
+        `refreshing in ${countdown}s`;
+
+      if (countdown <= 0) {
+        countdown = 5;
+        document.getElementById('refresh-label').textContent =
+          'refreshing...';
+        await refresh();
+        document.getElementById('refresh-label').textContent =
+          'refreshing in 5s';
+      }
+    }, 1000);
+  }
+
+  async function init() {
+    log('dashboard connected', 'info');
+    await fetchFiles();
+    await refresh();
+    startCountdown();
+  }
+
+  init();
+</script>
+
+</body>
+</html>
