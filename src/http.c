@@ -1,13 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include "../include/http.h"
 #include "../include/server_tcp.h"
 
 int http_parse(const char *raw, int raw_len, http_request_t *req) {
     memset(req, 0, sizeof(*req));
-
+    req->content_length = -1;
+    req->keep_alive = 1; // HTTP/1.1 keeps connections open by default (persistent connections)
 
     const char *line_end = strstr(raw, "\r\n");
     if (!line_end) return -1;
@@ -25,6 +27,10 @@ int http_parse(const char *raw, int raw_len, http_request_t *req) {
         return -1;
     }
 
+    // HTTP/1.0 opens a new TCP connection for each request
+    if(strcmp(req->version, "HTTP/1.0")==0){
+        req->keep_alive = 0;
+    }
 
     const char *cursor = line_end + 2; // skip past first \r\n
 
@@ -71,7 +77,27 @@ int http_parse(const char *raw, int raw_len, http_request_t *req) {
     req->body_len = (int)(raw + raw_len - cursor);
     if (req->body_len < 0) req->body_len = 0;
 
+    const char *c1 = http_get_header(req, "Content-Length");
+    if(c1) {
+        req->content_length = atoi(c1);
+    }
+
+    const char *conn = http_get_header(req, "Connection");
+    if(conn) {
+        if(strcasecmp(conn, "close") == 0)  req->keep_alive = 0;
+        else if (strcasecmp(conn, "keep-alive") == 0) req->keep_alive = 1;
+    }
+
     return 0;
+}
+
+const char *http_get_header(const http_request_t *req, const char *name) {
+    for (int i = 0; i<req->header_count; i++){
+        if(strcasecmp(req->headers[i].name, name) == 0){
+            return req->headers[i].value;
+        } 
+    }
+    return NULL;
 }
 
 //http response
@@ -79,16 +105,26 @@ void http_respond(int conn_fd,
                   const char *status_text,
                   const char *content_type,
                   const char *body,
-                  int body_len) {
+                  int body_len){
+    http_respond_ex(conn_fd, status_text, content_type, body, body_len, 0);
+}
+//http response
+void http_respond_ex(int conn_fd,
+                  const char *status_text,
+                  const char *content_type,
+                  const char *body,
+                  int body_len,
+                  int keep_alive) {
 
     char headers[BUFFER_SIZE];
     int header_len = snprintf(headers, sizeof(headers),
         "HTTP/1.1 %s\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %d\r\n"
-        "Connection: close\r\n"     
+        "Connection: %s\r\n"     
         "\r\n",
-        status_text, content_type, body_len);
+        status_text, content_type, body_len,
+        keep_alive ? "keep-alive" : "close");
 
     write(conn_fd, headers, header_len);
     if (body && body_len > 0) {
@@ -104,7 +140,38 @@ void http_respond_error(int conn_fd,
         "<html><body><h1>%s</h1><p>%s</p></body></html>",
         status_text, message);
 
-    http_respond(conn_fd, status_text, "text/html", body, body_len);
+    //errors close the connection (safe)
+    http_respond_ex(conn_fd, status_text, "text/html", body, body_len, 0);
+}
+
+void http_chunked_start(int conn_fd, const char *status_text, const char *content_type, int keep_alive) {
+    char headers[512];
+    int len = snprintf(headers, sizeof(headers),
+        "HTTP/1.1 %s\r\n"
+        "Content-Type: %s\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "Connection: %s\r\n"
+        "\r\n",
+        status_text, content_type,
+        keep_alive ? "keep-alive" : "close");
+
+    write(conn_fd, headers, len);
+}
+
+// each chunk: <hex-length>\r\n<data>\r\n
+void http_chunk_send(int conn_fd, const char *data, int len) {
+    if (len <= 0) return;
+
+    char size_line[32];
+    int  size_len = snprintf(size_line, sizeof(size_line), "%x\r\n", len);
+
+    write(conn_fd, size_line, size_len);
+    write(conn_fd, data, len);
+    write(conn_fd, "\r\n", 2);
+}
+// terminating chunk: 0\r\n\r\n
+void http_chunk_end(int conn_fd) {
+    write(conn_fd, "0\r\n\r\n", 5);
 }
 
 //read file
