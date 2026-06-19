@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>      
-#include <sys/socket.h> 
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>  
 #include <arpa/inet.h> //IP->String (inet_ntoa())
 #include "server_tcp.h"
@@ -16,7 +17,8 @@
 #include "config.h"
 #include <time.h>
 
-
+#define KEEPALIVE_TIMEOUT_SEC  15
+#define MAX_REQUESTS_PER_CONN  100
 
 void router_set_start_time(void);
 static void handle_connection(int conn_fd, const char *client_ip);
@@ -131,89 +133,147 @@ int main(void) {
 }
 
 static void handle_connection(int conn_fd, const char *client_ip) {
-    char raw[BUFFER_SIZE];
-    int total = 0;
-    ssize_t n;
+    int requests_handled = 0;
 
-    while (total < (int)sizeof(raw) - 1) {
-        n = read(conn_fd, raw + total, sizeof(raw) - 1 - total);
-        if (n <= 0) break;        
-        total += n;
-        raw[total] = '\0';
+    while (requests_handled < MAX_REQUESTS_PER_CONN) {
 
-        if (!security_request_size_ok(total)) {
-            http_respond_error(conn_fd, "413 Payload Too Large",
-                               "Request exceeds maximum allowed size.");
+        // set a read timeout so an idle keep-alive connection doesnt
+        // hold the thread forever
+        struct timeval tv;
+        tv.tv_sec = KEEPALIVE_TIMEOUT_SEC;
+        tv.tv_usec = 0;
+        setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        char raw[BUFFER_SIZE];
+        int total = 0;
+        ssize_t n;
+        int headers_complete = 0;
+
+        while (total < (int)sizeof(raw) - 1) {
+            n = read(conn_fd, raw + total, sizeof(raw) - 1 - total);
+            if (n <= 0) return;        
+            total += n;
+            raw[total] = '\0';
+
+            if (!security_request_size_ok(total)) {
+                http_respond_error(conn_fd, "413 Payload Too Large",
+                                "Request exceeds maximum allowed size.");
+                return;
+            }
+            // stop once we have the full headers
+            if (strstr(raw, "\r\n\r\n")){
+                headers_complete = 1;
+                break;
+            }
+        }
+
+        if (!headers_complete) return;
+
+        http_request_t req;
+        if (http_parse(raw, total, &req) < 0) {
+                log_warn("server", "malformed request from client");
+                http_respond_error(conn_fd, "400 Bad Request", "Malformed request.");
+                return;
+        }
+        char *body_buf       = NULL;
+        int   body_total     = req.body_len;
+        int   need_more_body = req.content_length > 0 && req.content_length > req.body_len;
+
+        if (need_more_body) {
+
+            body_buf = malloc(req.content_length + 1);
+            if (!body_buf) {
+                http_respond_error(conn_fd, "500 Internal Server Error","Out of memory.");
+                return;
+            }
+            memcpy(body_buf, req.body, req.body_len);
+            body_total = req.body_len;
+
+            while (body_total < req.content_length) {
+                n = read(conn_fd, body_buf + body_total,
+                        req.content_length - body_total);
+                if (n <= 0) { free(body_buf); return; }
+                body_total += n;
+            }
+            body_buf[body_total] = '\0';
+
+            req.body     = body_buf;
+            req.body_len = body_total;
+        }
+
+        log_info("server", "[%s] %s %s (keep-alive=%d)",
+                 client_ip, req.method, req.path, req.keep_alive);
+        printf("[%s] %s\n", req.method, req.path);
+
+        if (strcmp(req.method, "GET") != 0 && strcmp(req.method, "POST") != 0) { //for now just GET
+            
+            log_warn("server", "method not allowed: %s", req.method);
+            http_respond_error(conn_fd, "405 Method Not Allowed",
+                            "Only GET & POST is supported.");
+            if(body_buf) free(body_buf);
             return;
         }
-        // stop once we have the full headers
-        if (strstr(raw, "\r\n\r\n")) break;
-    }
 
-    if (total == 0) return;
+        int handled = router_dispatch(conn_fd, &req, routes);
 
-    http_request_t req;
-    if (http_parse(raw, total, &req) < 0) {
-            log_warn("server", "malformed request from client");
-            http_respond_error(conn_fd, "400 Bad Request", "Malformed request.");
+        if (!handled) {
+            //check if pth start with a known app
+            app_entry_t *app = registry_find_by_prefix(req.path);
+            if (app) {
+                    log_info("proxy", "routing %s -> %s (port %d)", req.path, app->name, app->port);
+                    proxy_forward(conn_fd, &req, app->port, client_ip);
+                    handled =1;
+            }
+        }
+
+        if (!handled && strcmp(req.method, "GET") == 0) {
+            char filepath[MAX_PATH_LEN];
+            if (strcmp(req.path, "/") == 0) {
+                snprintf(filepath, sizeof(filepath),
+                        "%s/index.html", g_config.static_dir);
+            } else {
+                snprintf(filepath, sizeof(filepath),
+                        "%s%s", g_config.static_dir, req.path);
+            }
+
+            if (!security_path_is_safe(filepath, g_config.static_dir)) {
+                http_respond_error(conn_fd, "403 Forbidden", "Access denied.");
+                if (body_buf) free(body_buf);
+                return;
+            }
+
+            char *fbody     = NULL;
+            int   fbody_len = read_file(filepath, &fbody);
+
+            if (fbody_len < 0) {
+                log_warn("server", "404 not found: %s", filepath);
+                http_respond_error(conn_fd, "404 Not Found",
+                                   "The requested file was not found.");
+            } else {
+                const char *content_type = "text/plain";
+                if (strstr(filepath, ".html"))      content_type = "text/html";
+                else if (strstr(filepath, ".css"))  content_type = "text/css";
+                else if (strstr(filepath, ".js"))   content_type = "application/javascript";
+                else if (strstr(filepath, ".json")) content_type = "application/json";
+
+                http_respond_ex(conn_fd, "200 OK", content_type,
+                               fbody, fbody_len, req.keep_alive);
+                free(fbody);
+            }
+            handled = 1;
+        } else if (!handled) {
+            http_respond_error(conn_fd, "404 Not Found", "No route matched.");
+        }
+
+        if(body_buf) free(body_buf);
+
+        if(!req.keep_alive) {
             return;
+        }
+
+        requests_handled++;
     }
 
-    printf("[%s] %s\n", req.method, req.path);
-
-    if (strcmp(req.method, "GET") != 0) { //for now just GET
-        
-        log_warn("server", "method not allowed: %s", req.method);
-        http_respond_error(conn_fd, "405 Method Not Allowed",
-                           "Only GET is supported.");
-        return;
-    }
-
-    if (router_dispatch(conn_fd, &req, routes)) {
-        return;
-    }
-
-    //check if pth start with a known app
-    app_entry_t *app = registry_find_by_prefix(req.path);
-    if (app) {
-            log_info("proxy", "routing %s -> %s (port %d)", req.path, app->name, app->port);
-            proxy_forward(conn_fd, &req, app->port, client_ip);
-            return;
-    }
-
-    //serve static files
-    char filepath[MAX_PATH_LEN];
-    const char *req_path = req.path;
-
-    if (strcmp(req_path, "/") == 0) {
-        snprintf(filepath, sizeof(filepath), "%s/index.html", g_config.static_dir); //to-do: secure critical path!!!
-    } else {
-        snprintf(filepath, sizeof(filepath), "%s%s",g_config.static_dir, req_path);
-    }
-
-
-    if (!security_path_is_safe(filepath, g_config.static_dir)) {
-        http_respond_error(conn_fd, "403 Forbidden", "Access denied.");
-        return;
-    }
-
-    char *body = NULL;
-    int   body_len = read_file(filepath, &body);
-
-    if (body_len < 0) {
-        log_warn("server", "404 not found: %s", filepath);
-        http_respond_error(conn_fd, "404 Not Found",
-                           "The requested file was not found!");
-        return;
-    }
-
-    const char *content_type = "text/plain";
-    if (strstr(filepath, ".html")) content_type = "text/html";
-    else if (strstr(filepath, ".css"))  content_type = "text/css";
-    else if (strstr(filepath, ".js"))   content_type = "application/javascript";
-    else if (strstr(filepath, ".json")) content_type = "application/json";
-
-    http_respond(conn_fd, "200 OK", content_type, body, body_len);
-    free(body); 
-
+    log_debug("server", "[%s] reached max requests per connection, closing",
+             client_ip);
 }
