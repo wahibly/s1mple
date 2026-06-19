@@ -10,7 +10,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "logger.h"
+#include <dirent.h>
 
+static time_t server_start_time = 0;
+
+void router_set_start_time(void) {
+    server_start_time = time(NULL);
+}
 
 static void handler_home(int conn_fd, http_request_t *req) {
     (void)req;
@@ -31,16 +37,30 @@ static void handler_home(int conn_fd, http_request_t *req) {
     free(body);
 }
 
+
 static void handler_api_status(int conn_fd, http_request_t *req) {
     (void)req;
-    const char *body =
+
+    if (server_start_time == 0) server_start_time = time(NULL);
+    long uptime = (long)(time(NULL) - server_start_time);
+
+    app_entry_t apps[MAX_APPS];
+    int app_count = 0;
+    registry_list(apps, &app_count);
+
+    char body[512];
+    int body_len = snprintf(body, sizeof(body),
         "{\n"
         "  \"status\": \"ok\",\n"
         "  \"server\": \"s1mple\",\n"
-        "  \"version\": \"0.1.0\"\n"
-        "}";
-    http_respond(conn_fd, "200 OK", "application/json",
-                 body, (int)strlen(body));
+        "  \"version\": \"0.11.0\",\n"
+        "  \"port\": %d,\n"
+        "  \"uptime\": %ld,\n"
+        "  \"apps_running\": %d\n"
+        "}",
+        g_config.port, uptime, app_count);
+
+    http_respond(conn_fd, "200 OK", "application/json", body, body_len);
 }
 
 static void handler_about(int conn_fd, http_request_t *req) {
@@ -192,6 +212,61 @@ static void handler_api_apps(int conn_fd, http_request_t *req) {
 }
 
 
+static void handler_api_files(int conn_fd, http_request_t *req) {
+    (void)req;
+
+    DIR *dir = opendir("apps");
+    if (!dir) {
+        http_respond_error(conn_fd, "500 Internal Server Error", "Could not open apps directory.");
+        return;
+    }
+
+    char body[4096];
+    int  pos = 0;
+    pos += snprintf(body + pos, sizeof(body) - pos, "{\"files\": [");
+
+    struct dirent *entry;
+    int first = 1;
+    while ((entry = readdir(dir)) != NULL) {
+        // skip hidden files and directories
+        if (entry->d_name[0] == '.') continue;
+
+        // only show .py and .js files(for now!)
+        const char *ext = strrchr(entry->d_name, '.');
+        if (!ext) continue;
+        if (strcmp(ext, ".py") != 0 && strcmp(ext, ".js") != 0) continue;
+
+        pos += snprintf(body + pos, sizeof(body) - pos,
+                        "%s\"%s\"",
+                        first ? "" : ", ",
+                        entry->d_name);
+        first = 0;
+    }
+
+    pos += snprintf(body + pos, sizeof(body) - pos, "]}");
+    closedir(dir);
+
+    http_respond(conn_fd, "200 OK", "application/json", body, pos);
+}
+
+static void handler_admin(int conn_fd, http_request_t *req) {
+    (void)req;
+
+    char filepath[256];
+    snprintf(filepath, sizeof(filepath), "%s/admin.html", g_config.static_dir);
+
+    char *body     = NULL;
+    int   body_len = read_file(filepath, &body);
+
+    if (body_len < 0) {
+        http_respond_error(conn_fd, "404 Not Found", "Admin dashboard not found.");
+        return;
+    }
+
+    http_respond(conn_fd, "200 OK", "text/html", body, body_len);
+    free(body);
+}
+
 
 
 route_t routes[] = {
@@ -203,6 +278,8 @@ route_t routes[] = {
     { "/run/messi.js", handler_run_node},
     {"/deploy", handler_deploy},
     {"/undeploy", handler_undeploy},
+    { "/api/files",handler_api_files},
+    { "/admin", handler_admin},
 
     { NULL, NULL}
 };

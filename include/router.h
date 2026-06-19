@@ -12,6 +12,7 @@ typedef struct {
 
 extern route_t routes[];
 
+void router_set_start_time(void);
 int router_dispatch(int conn_fd, http_request_t *req, route_t *routes);
 
 #endif

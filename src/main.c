@@ -14,10 +14,11 @@
 #include "logger.h"
 #include "security.h"
 #include "config.h"
+#include <time.h>
 
 
 
-
+void router_set_start_time(void);
 static void handle_connection(int conn_fd, const char *client_ip);
 
 typedef struct {
@@ -81,7 +82,7 @@ int main(void) {
     
     log_info("server", "s1mple listening on http://localhost:%d", g_config.port);
 
-
+    router_set_start_time();
     while(1){
         conn_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (conn_fd < 0) {
