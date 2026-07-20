@@ -16,6 +16,7 @@
 #include "security.h"
 #include "config.h"
 #include <time.h>
+#include <static.h>
 
 #define KEEPALIVE_TIMEOUT_SEC  15
 #define MAX_REQUESTS_PER_CONN  100
@@ -229,11 +230,9 @@ static void handle_connection(int conn_fd, const char *client_ip) {
         if (!handled && strcmp(req.method, "GET") == 0) {
             char filepath[MAX_PATH_LEN];
             if (strcmp(req.path, "/") == 0) {
-                snprintf(filepath, sizeof(filepath),
-                        "%s/index.html", g_config.static_dir);
+                snprintf(filepath, sizeof(filepath), "%s/index.html", g_config.static_dir);
             } else {
-                snprintf(filepath, sizeof(filepath),
-                        "%s%s", g_config.static_dir, req.path);
+                snprintf(filepath, sizeof(filepath), "%s%s", g_config.static_dir, req.path);
             }
 
             if (!security_path_is_safe(filepath, g_config.static_dir)) {
@@ -242,24 +241,7 @@ static void handle_connection(int conn_fd, const char *client_ip) {
                 return;
             }
 
-            char *fbody     = NULL;
-            int   fbody_len = read_file(filepath, &fbody);
-
-            if (fbody_len < 0) {
-                log_warn("server", "404 not found: %s", filepath);
-                http_respond_error(conn_fd, "404 Not Found",
-                                   "The requested file was not found.");
-            } else {
-                const char *content_type = "text/plain";
-                if (strstr(filepath, ".html"))      content_type = "text/html";
-                else if (strstr(filepath, ".css"))  content_type = "text/css";
-                else if (strstr(filepath, ".js"))   content_type = "application/javascript";
-                else if (strstr(filepath, ".json")) content_type = "application/json";
-
-                http_respond_ex(conn_fd, "200 OK", content_type,
-                               fbody, fbody_len, req.keep_alive);
-                free(fbody);
-            }
+            static_serve(conn_fd, &req, filepath);
             handled = 1;
         } else if (!handled) {
             http_respond_error(conn_fd, "404 Not Found", "No route matched.");
