@@ -17,6 +17,7 @@
 #include "config.h"
 #include <time.h>
 #include <static.h>
+#include "event.h"
 
 #define KEEPALIVE_TIMEOUT_SEC  15
 #define MAX_REQUESTS_PER_CONN  100
@@ -83,49 +84,57 @@ int main(void) {
     }
 
     
-    log_info("server", "s1mple listening on http://localhost:%d", g_config.port);
+    log_info("server", "s1mple listening on http://localhost:%d [%s]", g_config.port, g_config.concurrency);
 
-    router_set_start_time();
-    while(1){
-        conn_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
-        if (conn_fd < 0) {
-            perror("accept");
-            continue; //not kill server en cas bad accept
+    if (strcmp(g_config.concurrency, "epoll") == 0) {
+        event_loop_run(server_fd);
+    } else {
+        // original pthread model
+        while (1) {
+            conn_fd = accept(server_fd,
+                             (struct sockaddr *)&client_addr,
+                             &client_len);
+            if (conn_fd < 0) { perror("accept"); continue; }
+
+            char client_ip[INET_ADDRSTRLEN];
+            strncpy(client_ip, inet_ntoa(client_addr.sin_addr),
+                    INET_ADDRSTRLEN - 1);
+
+            if (!security_conn_allow(client_ip)) {
+                const char *resp =
+                    "HTTP/1.1 429 Too Many Requests\r\n"
+                    "Content-Length: 22\r\n"
+                    "Connection: close\r\n"
+                    "\r\n"
+                    "Too many connections.\n";
+                write(conn_fd, resp, strlen(resp));
+                close(conn_fd);
+                continue;
+            }
+
+            log_info("server", "connection from %s:%d",
+                     client_ip, ntohs(client_addr.sin_port));
+
+            thread_args_t *args = malloc(sizeof(thread_args_t));
+            if (!args) {
+                security_conn_release(client_ip);
+                close(conn_fd);
+                continue;
+            }
+            args->conn_fd = conn_fd;
+            strncpy(args->client_ip, client_ip, INET_ADDRSTRLEN - 1);
+
+            pthread_t thread;
+            if (pthread_create(&thread, NULL,
+                               connection_thread, args) != 0) {
+                log_error("server", "pthread_create failed");
+                security_conn_release(client_ip);
+                free(args);
+                close(conn_fd);
+                continue;
+            }
+            pthread_detach(thread);
         }
-
-        char client_ip[INET_ADDRSTRLEN];
-        strncpy(client_ip, inet_ntoa(client_addr.sin_addr), INET_ADDRSTRLEN - 1);
-
-        if (!security_conn_allow(client_ip)) {
-            const char *resp =
-                "HTTP/1.1 429 Too Many Requests\r\n"
-                "Content-Type: text/plain\r\n"
-                "Content-Length: 23\r\n"
-                "Connection: close\r\n"
-                "\r\n"
-                "Too many connections.\r\n";
-            write(conn_fd, resp, strlen(resp));
-            close(conn_fd);
-            continue;
-        }
-        log_info("server", "connection from %s:%d", client_ip, ntohs(client_addr.sin_port));
-
-        thread_args_t *args = malloc(sizeof(thread_args_t));
-        if (!args) { close(conn_fd); continue; }
-        args->conn_fd = conn_fd;
-
-        strncpy(args->client_ip, client_ip, INET_ADDRSTRLEN - 1);
-
-        pthread_t thread;
-        if (pthread_create(&thread, NULL, connection_thread, args) != 0) {
-            log_error("server", "pthread_create failed");
-            free(args);
-            close(conn_fd);
-            continue;
-        }
-
-        pthread_detach(thread);
-
     }
     close(server_fd);
     logger_close();

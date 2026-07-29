@@ -19,6 +19,7 @@ static void config_set_defaults(void) {
     g_config.proxy_timeout = 30;
     strncpy(g_config.static_dir, "static",      sizeof(g_config.static_dir) - 1);
     strncpy(g_config.log_file,   "s1mple.log",  sizeof(g_config.log_file)   - 1);
+    strncpy(g_config.concurrency, "thread", sizeof(g_config.concurrency) - 1);
 }
 
 //remove leading and trailing whitespace in place
@@ -74,6 +75,9 @@ static void config_apply_pair(const char *key, const char *value) {
 
     }else if (strcmp(key, "proxy_timeout") == 0){
         g_config.proxy_timeout= atoi(value);
+
+    } else if (strcmp(key, "concurrency") == 0) {
+        strncpy(g_config.concurrency, value, sizeof(g_config.concurrency) - 1);
 
     } else {
         fprintf(stderr, "[config] unknown key '%s' — ignored\n", key);
@@ -146,4 +150,5 @@ void config_print(void) {
     log_info("config", "max_apps        = %d", g_config.max_apps);
     log_info("config", "base_port       = %d", g_config.base_port);
     log_info("config", "proxy_timeout   = %d", g_config.proxy_timeout);
+    log_info("config", "concurrency     = %s", g_config.concurrency);
 }
