@@ -17,6 +17,8 @@ typedef struct {
     int  max_apps;
     int  base_port;
     int proxy_timeout;
+
+    char concurrency[16];  
 } server_config_t;
 
 // Load config from file. Missing keys use defaults.
@@ -27,3 +29,4 @@ void config_print(void);
 extern server_config_t g_config;
 
 #endif
+
