@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include "config.h"
 #include "logger.h"
+#include "lb.h"
 
 server_config_t g_config;
 
@@ -78,6 +79,33 @@ static void config_apply_pair(const char *key, const char *value) {
 
     } else if (strcmp(key, "concurrency") == 0) {
         strncpy(g_config.concurrency, value, sizeof(g_config.concurrency) - 1);
+    
+    } else if (strcmp(key, "lb_route") == 0) {
+        
+        char prefix[64], algo[32];
+        if (sscanf(value, "%63s %31s", prefix, algo) == 2) {
+            lb_add_route(prefix, algo);
+        } else {
+            fprintf(stderr, "[config] invalid lb_route: '%s'\n", value);
+        }
+
+    } else if (strcmp(key, "lb_backend") == 0) {
+        // Format: lb_backend = /prefix host:port
+        // e.g.:   lb_backend = /api localhost:5001
+        char prefix[64], hostport[128];
+        if (sscanf(value, "%63s %127s", prefix, hostport) == 2) {
+            char host[64];
+            int  port;
+            if (sscanf(hostport, "%63[^:]:%d", host, &port) == 2) {
+                lb_add_backend(prefix, host, port);
+            } else {
+                fprintf(stderr,
+                        "[config] invalid lb_backend host:port: '%s'\n",
+                        hostport);
+            }
+        } else {
+            fprintf(stderr, "[config] invalid lb_backend: '%s'\n", value);
+        }
 
     } else {
         fprintf(stderr, "[config] unknown key '%s' — ignored\n", key);
