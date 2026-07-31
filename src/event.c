@@ -18,6 +18,7 @@
 #include "config.h"
 #include "logger.h"
 #include "server_tcp.h"
+#include "lb.h"
 
 #define MAX_EVENTS       64      // max events per epoll_wait() call
 #define MAX_CONNS        4096    // max  connections simultany
@@ -209,15 +210,11 @@ static char *build_response(conn_t *c, http_request_t *req, int *out_len) {
 
 // called when epoll says fd is readable.
 static void handle_read(int epfd, conn_t *c) {
-    // Read available bytes into the connection's read buffer
     ssize_t n = read(c->fd,
                      c->rbuf + c->rbuf_len,
                      sizeof(c->rbuf) - 1 - c->rbuf_len);
 
-    if (n == 0) {
-        conn_close(epfd, c);
-        return;
-    }
+    if (n == 0) { conn_close(epfd, c); return; }
 
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return;
@@ -228,7 +225,6 @@ static void handle_read(int epfd, conn_t *c) {
     c->rbuf_len += n;
     c->rbuf[c->rbuf_len] = '\0';
 
-    // Size limit check
     if (!security_request_size_ok(c->rbuf_len)) {
         const char *resp =
             "HTTP/1.1 413 Payload Too Large\r\n"
@@ -250,10 +246,8 @@ static void handle_read(int epfd, conn_t *c) {
     }
 
     if (c->state == CONN_READING_HEADERS) {
-        // Wait until we have the full headers
         if (!strstr(c->rbuf, "\r\n\r\n")) return;
 
-        // Parse the request
         http_request_t req;
         if (http_parse(c->rbuf, c->rbuf_len, &req) < 0) {
             const char *resp =
@@ -277,18 +271,16 @@ static void handle_read(int epfd, conn_t *c) {
 
         c->keep_alive = req.keep_alive;
 
-        // If POST body not fully received yet switch to body reading
         if (req.content_length > 0 &&
             req.body_len < req.content_length) {
             c->state = CONN_READING_BODY;
             return;
         }
 
-        // Full request received — dispatch it
         log_info("event", "[%s] %s %s",
                  c->client_ip, req.method, req.path);
 
-        // ── Check if route table matches ──────────────────────────────
+        // ── Step 1: check router table ────────────────────────────────
         int router_matched = 0;
         {
             char path_only[MAX_PATH_LEN];
@@ -296,7 +288,6 @@ static void handle_read(int epfd, conn_t *c) {
             path_only[MAX_PATH_LEN - 1] = '\0';
             char *q = strchr(path_only, '?');
             if (q) *q = '\0';
-
             for (int ri = 0; routes[ri].path != NULL; ri++) {
                 if (strcmp(path_only, routes[ri].path) == 0) {
                     router_matched = 1;
@@ -305,27 +296,18 @@ static void handle_read(int epfd, conn_t *c) {
             }
         }
 
-        // ── Check if a deployed app owns this prefix ──────────────────
+        // ── Step 2: check load balancer ───────────────────────────────
+        lb_route_t *lb_route = lb_find_route(req.path);
+
+        // ── Step 3: check app registry ────────────────────────────────
         app_entry_t *app = registry_find_by_prefix(req.path);
 
-        if (!router_matched && !app && strcmp(req.method, "GET") == 0) {
-            // ── Static file — serve directly to avoid socketpair limits ──
-            char filepath[MAX_PATH_LEN];
-            if (strcmp(req.path, "/") == 0) {
-                snprintf(filepath, sizeof(filepath),
-                         "%s/index.html", g_config.static_dir);
-            } else {
-                snprintf(filepath, sizeof(filepath),
-                         "%s%s", g_config.static_dir, req.path);
-            }
+        // ── Dispatch ──────────────────────────────────────────────────
 
-            if (!security_path_is_safe(filepath, g_config.static_dir)) {
-                http_respond_error(c->fd, "403 Forbidden", "Access denied.");
-            } else {
-                static_serve(c->fd, &req, filepath);
-            }
-
-            // Handle keep-alive after direct send
+        if (!router_matched && lb_route) {
+            // Load balanced route
+            log_info("event", "lb routing %s", req.path);
+            proxy_forward_lb(c->fd, &req, c->client_ip);
             c->requests++;
             if (!c->keep_alive) {
                 conn_close(epfd, c);
@@ -338,50 +320,83 @@ static void handle_read(int epfd, conn_t *c) {
             return;
         }
 
-        // ── Router or proxy — capture via socketpair ──────────────────
-        // These responses are always small (JSON, HTML snippets)
-        // so the socketpair buffer is never a bottleneck here
+        if (!router_matched && !lb_route && app) {
+            // Registry proxy
+            log_info("event", "proxying %s → %s:%d",
+                     req.path, app->name, app->port);
+            proxy_forward(c->fd, &req, app->port, c->client_ip);
+            c->requests++;
+            if (!c->keep_alive) {
+                conn_close(epfd, c);
+            } else {
+                c->state    = CONN_READING_HEADERS;
+                c->rbuf_len = 0;
+                memset(c->rbuf, 0, sizeof(c->rbuf));
+                epoll_mod(epfd, c->fd, EPOLLIN);
+            }
+            return;
+        }
+
+        if (!router_matched && !lb_route && !app &&
+            strcmp(req.method, "GET") == 0) {
+            // Static file — serve directly
+            char filepath[MAX_PATH_LEN];
+            if (strcmp(req.path, "/") == 0) {
+                snprintf(filepath, sizeof(filepath),
+                         "%s/index.html", g_config.static_dir);
+            } else {
+                snprintf(filepath, sizeof(filepath),
+                         "%s%s", g_config.static_dir, req.path);
+            }
+            if (!security_path_is_safe(filepath, g_config.static_dir)) {
+                http_respond_error(c->fd, "403 Forbidden", "Access denied.");
+            } else {
+                static_serve(c->fd, &req, filepath);
+            }
+            c->requests++;
+            if (!c->keep_alive) {
+                conn_close(epfd, c);
+            } else {
+                c->state    = CONN_READING_HEADERS;
+                c->rbuf_len = 0;
+                memset(c->rbuf, 0, sizeof(c->rbuf));
+                epoll_mod(epfd, c->fd, EPOLLIN);
+            }
+            return;
+        }
+
+        // Router matched or unhandled — use socketpair capture
         int   resp_len = 0;
         char *resp_buf = build_response(c, &req, &resp_len);
-
         if (!resp_buf) {
             conn_close(epfd, c);
             return;
         }
-
         conn_set_response(c, resp_buf, resp_len);
         epoll_mod(epfd, c->fd, EPOLLOUT);
 
     } else if (c->state == CONN_READING_BODY) {
-        // Keep accumulating until we have the full body
         http_request_t req;
         if (http_parse(c->rbuf, c->rbuf_len, &req) < 0) {
             conn_close(epfd, c);
             return;
         }
-
         if (req.content_length > 0 &&
             req.body_len < req.content_length) {
-            return; // still need more body bytes
+            return;
         }
-
-        // Full body received
         log_info("event", "[%s] %s %s (body complete)",
                  c->client_ip, req.method, req.path);
-
         int   resp_len = 0;
         char *resp_buf = build_response(c, &req, &resp_len);
-
         if (!resp_buf) {
             conn_close(epfd, c);
             return;
         }
-
         conn_set_response(c, resp_buf, resp_len);
         epoll_mod(epfd, c->fd, EPOLLOUT);
     }
 }
-
 // called when epoll says fd is writable.
 static void handle_write(int epfd, conn_t *c) {
     // Write as many bytes as the socket will accept right now
