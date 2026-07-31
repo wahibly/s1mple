@@ -18,6 +18,7 @@
 #include <time.h>
 #include <static.h>
 #include "event.h"
+#include "lb.h"
 
 #define KEEPALIVE_TIMEOUT_SEC  15
 #define MAX_REQUESTS_PER_CONN  100
@@ -45,6 +46,7 @@ static void *connection_thread(void *arg) {
 
 
 int main(void) {
+    lb_init();
     config_load("s1mple.conf");
     logger_init(g_config.log_file, g_config.log_level);
     config_print();
@@ -224,8 +226,23 @@ static void handle_connection(int conn_fd, const char *client_ip) {
             return;
         }
 
-        int handled = router_dispatch(conn_fd, &req, routes);
+        log_debug("server", "dispatch: path='%s' lb_routes=%d",
+          req.path, g_lb.route_count);
 
+        lb_route_t *test = lb_find_route(req.path);
+        log_debug("server", "lb_find_route result: %s",
+                test ? test->prefix : "NULL");
+
+        int handled = router_dispatch(conn_fd, &req, routes);
+        
+        if (!handled) {
+            lb_route_t *lb_route = lb_find_route(req.path);
+            if (lb_route) {
+                log_info("server", "lb routing %s", req.path);
+                proxy_forward_lb(conn_fd, &req, client_ip);
+                handled = 1;
+            }
+        }
         if (!handled) {
             //check if pth start with a known app
             app_entry_t *app = registry_find_by_prefix(req.path);

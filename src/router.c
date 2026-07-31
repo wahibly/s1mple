@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include "logger.h"
 #include <dirent.h>
+#include "lb.h"
+#include "proxy.h"
 
 static time_t server_start_time = 0;
 
@@ -266,7 +268,14 @@ static void handler_admin(int conn_fd, http_request_t *req) {
     http_respond(conn_fd, "200 OK", "text/html", body, body_len);
     free(body);
 }
-
+// GET /api/lb/stats
+static void handler_lb_stats(int conn_fd, http_request_t *req) {
+    (void)req;
+    char body[4096];
+    lb_print_stats(body, sizeof(body));
+    http_respond(conn_fd, "200 OK", "application/json",
+                 body, strlen(body));
+}
 
 
 route_t routes[] = {
@@ -280,6 +289,7 @@ route_t routes[] = {
     {"/undeploy", handler_undeploy},
     { "/api/files",handler_api_files},
     { "/admin", handler_admin},
+    { "/api/lb/stats",  handler_lb_stats    },
 
     { NULL, NULL}
 };
