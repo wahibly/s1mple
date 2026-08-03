@@ -3,7 +3,7 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Iinclude -pthread
 SRCS    = src/main.c src/http.c src/router.c src/process.c src/registry.c src/proxy.c src/logger.c \
-		  src/security.c src/config.c src/static.c src/event.c
+		  src/security.c src/config.c src/static.c src/event.c src/lb.c
 
 TARGET  = s1mple
 

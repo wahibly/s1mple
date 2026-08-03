@@ -12,6 +12,7 @@
 #include <errno.h>
 #include "config.h"
 #include <sys/time.h> 
+#include "lb.h"
 
 
 //proxy connect: open tcp connection to localhost:port
@@ -126,5 +127,67 @@ int proxy_forward(int conn_fd, http_request_t *req, int backend_port, const char
     log_info("proxy", "relayed %d bytes to client", total_relayed);
 
     close(backend_fd);
+    return 0;
+}
+
+
+int proxy_forward_lb(int conn_fd,
+                     http_request_t *req,
+                     const char *client_ip) {
+
+    // pick a backend
+    lb_backend_t *backend = lb_pick(req->path);
+    if (!backend) {
+        http_respond_error(conn_fd, "503 Service Unavailable", "No healthy backends available.");
+        return -1;
+    }
+
+    log_info("proxy", "lb → %s:%d for %s", backend->host, backend->port, req->path);
+
+    // try to connect
+    int backend_fd = proxy_connect(backend->port);
+    if (backend_fd < 0) {
+        // connection failed —> mark unhealthy and return 502
+        lb_set_health(backend, 0);
+        lb_release(backend);
+        http_respond_error(conn_fd, "502 Bad Gateway","Backend unavailable.");
+        return -1;
+    }
+    lb_set_health(backend, 1);
+
+    // build and send request
+    char request_buf[BUFFER_SIZE * 2];
+    int  request_len = proxy_build_request(req, client_ip,
+                                           request_buf,
+                                           sizeof(request_buf));
+    if (write(backend_fd, request_buf, request_len) < 0) {
+        log_error("proxy", "write to backend failed");
+        close(backend_fd);
+        lb_release(backend);
+        http_respond_error(conn_fd, "502 Bad Gateway", "Failed to send request to backend.");
+        return -1;
+    }
+
+    char    relay_buf[BUFFER_SIZE];
+    ssize_t n;
+    int     total_relayed = 0;
+
+    while ((n = read(backend_fd, relay_buf, sizeof(relay_buf))) > 0) {
+        if (write(conn_fd, relay_buf, n) < 0) break;
+        total_relayed += n;
+    }
+
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        log_warn("proxy", "lb backend %s:%d timed out",
+                 backend->host, backend->port);
+        if (total_relayed == 0) {
+            http_respond_error(conn_fd, "504 Gateway Timeout", "Backend did not respond in time.");
+        }
+    }
+
+    log_info("proxy", "lb relayed %d bytes from %s:%d", total_relayed, backend->host, backend->port);
+
+    close(backend_fd);
+    lb_release(backend);
     return 0;
 }
