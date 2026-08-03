@@ -124,7 +124,7 @@ static char *build_response(conn_t *c, http_request_t *req, int *out_len) {
     if (!handled) {
         app_entry_t *app = registry_find_by_prefix(req->path);
         if (app) {
-            proxy_forward(fake_fd, req, app->port, c->client_ip);
+            proxy_forward_cached(fake_fd, req, app->port, c->client_ip);
             handled = 1;
         }
     }
@@ -324,7 +324,7 @@ static void handle_read(int epfd, conn_t *c) {
             // Registry proxy
             log_info("event", "proxying %s → %s:%d",
                      req.path, app->name, app->port);
-            proxy_forward(c->fd, &req, app->port, c->client_ip);
+            proxy_forward_cached(c->fd, &req, app->port, c->client_ip);
             c->requests++;
             if (!c->keep_alive) {
                 conn_close(epfd, c);
