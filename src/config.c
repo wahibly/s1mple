@@ -5,6 +5,7 @@
 #include "config.h"
 #include "logger.h"
 #include "lb.h"
+#include "cache.h"
 
 server_config_t g_config;
 
@@ -21,6 +22,7 @@ static void config_set_defaults(void) {
     strncpy(g_config.static_dir, "static",      sizeof(g_config.static_dir) - 1);
     strncpy(g_config.log_file,   "s1mple.log",  sizeof(g_config.log_file)   - 1);
     strncpy(g_config.concurrency, "thread", sizeof(g_config.concurrency) - 1);
+    g_config.cache_rule_count = 0;
 }
 
 //remove leading and trailing whitespace in place
@@ -106,7 +108,23 @@ static void config_apply_pair(const char *key, const char *value) {
         } else {
             fprintf(stderr, "[config] invalid lb_backend: '%s'\n", value);
         }
-
+    
+    } else if (strcmp(key, "cache_route") == 0) {
+        // Format: cache_route = /prefix TTL_seconds
+        char   prefix[128];
+        int    ttl;
+        if (sscanf(value, "%127s %d", prefix, &ttl) == 2) {
+            if (g_config.cache_rule_count < MAX_CACHE_RULES) {
+                cache_rule_t *r =
+                    &g_config.cache_rules[g_config.cache_rule_count++];
+                strncpy(r->prefix, prefix, sizeof(r->prefix) - 1);
+                r->ttl = ttl;
+                fprintf(stderr, "[config] cache_route: %s TTL=%ds\n",
+                        prefix, ttl);
+            }
+        } else {
+            fprintf(stderr, "[config] invalid cache_route: '%s'\n", value);
+        }
     } else {
         fprintf(stderr, "[config] unknown key '%s' — ignored\n", key);
     }
@@ -179,4 +197,5 @@ void config_print(void) {
     log_info("config", "base_port       = %d", g_config.base_port);
     log_info("config", "proxy_timeout   = %d", g_config.proxy_timeout);
     log_info("config", "concurrency     = %s", g_config.concurrency);
+    log_info("config", "cache_rules     = %d", g_config.cache_rule_count);
 }
