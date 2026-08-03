@@ -85,7 +85,8 @@ static lb_backend_t *pick_round_robin(lb_route_t *r) {
 
 static lb_backend_t *pick_least_conn(lb_route_t *r) {
     lb_backend_t *best     = NULL;
-    int           best_cnt = INT_MAX;
+    int best_cnt = INT_MAX;
+    int best_idx = -1;
 
     for (int i = 0; i < r->backend_count; i++) {
         lb_backend_t *b = &r->backends[i];
@@ -93,7 +94,12 @@ static lb_backend_t *pick_least_conn(lb_route_t *r) {
         if (b->active_conns < best_cnt) {
             best     = b;
             best_cnt = b->active_conns;
+            best_idx = i;
         }
+        if (best_cnt == 0) {
+        // All tied at 0 ,fall back to round robin
+        return pick_round_robin(r);
+    }
     }
     return best;
 }
