@@ -13,6 +13,8 @@
 #include "config.h"
 #include <sys/time.h> 
 #include "lb.h"
+#include "cache.h"
+#include <fcntl.h>
 
 
 //proxy connect: open tcp connection to localhost:port
@@ -190,4 +192,104 @@ int proxy_forward_lb(int conn_fd,
     close(backend_fd);
     lb_release(backend);
     return 0;
+}
+
+
+int proxy_forward_cached(int conn_fd,
+                          http_request_t *req,
+                          int backend_port,
+                          const char *client_ip) {
+
+    int ttl = cache_get_ttl(req->path);
+
+    if (ttl > 0 && strcmp(req->method, "GET") == 0) {
+        int   cached_len = 0;
+        int   cached_age = 0;
+        char *cached     = cache_get(req->path, &cached_len, &cached_age);
+
+        if (cached) {
+            const char *header_end = strstr(cached, "\r\n");
+            if (header_end) {
+                write(conn_fd, cached,
+                      (int)(header_end - cached));
+
+                char cache_headers[128];
+                int  ch_len = snprintf(cache_headers,
+                                       sizeof(cache_headers),
+                    "\r\nX-Cache: HIT\r\nX-Cache-Age: %d",
+                    cached_age);
+                write(conn_fd, cache_headers, ch_len);
+
+                write(conn_fd,
+                      header_end,
+                      cached_len - (int)(header_end - cached));
+            } else {
+                write(conn_fd, cached, cached_len);
+            }
+
+            free(cached);
+            log_info("cache", "served from cache: %s (age=%ds)",
+                     req->path, cached_age);
+            return 0;
+        }
+    }
+
+    // cache MISS
+
+    if (ttl > 0 && strcmp(req->method, "GET") == 0) {
+        // Capture via socketpair
+        int sv[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
+            return proxy_forward(conn_fd, req, backend_port, client_ip);
+        }
+
+        // Forward to backend, capture into sv[0]
+        proxy_forward(sv[0], req, backend_port, client_ip);
+        close(sv[0]);
+
+        // Read captured response
+        int    cap_size = CACHE_MAX_VAL_SIZE;
+        char  *cap_buf  = malloc(cap_size);
+        int    cap_total = 0;
+        ssize_t n;
+
+        int flags = fcntl(sv[1], F_GETFL, 0);
+        fcntl(sv[1], F_SETFL, flags | O_NONBLOCK);
+
+        while (cap_total < cap_size - 1) {
+            n = read(sv[1], cap_buf + cap_total,
+                     cap_size - 1 - cap_total);
+            if (n <= 0) break;
+            cap_total += n;
+        }
+        close(sv[1]);
+
+        if (cap_total > 0) {
+            // Store in cache
+            cache_set(req->path, cap_buf, cap_total, ttl);
+
+            // Send to client with X-Cache: MISS header
+            const char *header_end = strstr(cap_buf, "\r\n");
+            if (header_end) {
+                write(conn_fd, cap_buf,
+                      (int)(header_end - cap_buf));
+                char ch[64];
+                int  ch_len = snprintf(ch, sizeof(ch),
+                                       "\r\nX-Cache: MISS");
+                write(conn_fd, ch, ch_len);
+                write(conn_fd, header_end,
+                      cap_total - (int)(header_end - cap_buf));
+            } else {
+                write(conn_fd, cap_buf, cap_total);
+            }
+            log_info("cache", "stored: %s (%d bytes, TTL=%ds)",
+                     req->path, cap_total, ttl);
+        }
+
+        free(cap_buf);
+        return 0;
+    }
+
+    // Not cacheable —> forward directly
+    return proxy_forward(conn_fd, req, backend_port, client_ip);
 }
