@@ -13,6 +13,7 @@
 #include <dirent.h>
 #include "lb.h"
 #include "proxy.h"
+#include "cache.h"
 
 static time_t server_start_time = 0;
 
@@ -277,6 +278,47 @@ static void handler_lb_stats(int conn_fd, http_request_t *req) {
                  body, strlen(body));
 }
 
+// GET /api/cache/stats 
+static void handler_cache_stats(int conn_fd, http_request_t *req) {
+    (void)req;
+    char body[8192];
+    cache_stats(body, sizeof(body));
+    http_respond(conn_fd, "200 OK", "application/json", body, strlen(body));
+}
+
+// GET /api/cache/purge?key=/path to purge a specific cache entry
+static void handler_cache_purge(int conn_fd, http_request_t *req) {
+    const char *query = strchr(req->path, '?');
+    if (!query) {
+        http_respond_error(conn_fd, "400 Bad Request", "Missing ?key= parameter.");
+        return;
+    }
+
+    char key[512];
+    if (sscanf(query, "?key=%511s", key) != 1) {
+        http_respond_error(conn_fd, "400 Bad Request", "Invalid key parameter.");
+        return;
+    }
+
+    if (cache_purge(key) == 0) {
+        const char *body = "{\"status\": \"purged\"}";
+        http_respond(conn_fd, "200 OK", "application/json",
+                     body, strlen(body));
+    } else {
+        http_respond_error(conn_fd, "404 Not Found",
+                           "Key not found in cache.");
+    }
+}
+
+// GET /api/cache/clear
+static void handler_cache_clear(int conn_fd, http_request_t *req) {
+    (void)req;
+    cache_clear();
+    const char *body = "{\"status\": \"cleared\"}";
+    http_respond(conn_fd, "200 OK", "application/json",
+                 body, strlen(body));
+}
+
 
 route_t routes[] = {
     { "/", handler_home},
@@ -290,6 +332,9 @@ route_t routes[] = {
     { "/api/files",handler_api_files},
     { "/admin", handler_admin},
     { "/api/lb/stats",  handler_lb_stats    },
+    { "/api/cache/stats",  handler_cache_stats   },
+    { "/api/cache/purge",  handler_cache_purge   },
+    { "/api/cache/clear",  handler_cache_clear   },
 
     { NULL, NULL}
 };
