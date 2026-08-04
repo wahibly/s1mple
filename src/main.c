@@ -19,6 +19,7 @@
 #include <static.h>
 #include "event.h"
 #include "lb.h"
+#include "cache.h"
 
 #define KEEPALIVE_TIMEOUT_SEC  15
 #define MAX_REQUESTS_PER_CONN  100
@@ -47,6 +48,7 @@ static void *connection_thread(void *arg) {
 
 int main(void) {
     lb_init();
+    cache_init();
     config_load("s1mple.conf");
     logger_init(g_config.log_file, g_config.log_level);
     config_print();
@@ -244,14 +246,14 @@ static void handle_connection(int conn_fd, const char *client_ip) {
             }
         }
         if (!handled) {
-            //check if pth start with a known app
             app_entry_t *app = registry_find_by_prefix(req.path);
             if (app) {
-                    log_info("proxy", "routing %s -> %s (port %d)", req.path, app->name, app->port);
-                    proxy_forward(conn_fd, &req, app->port, client_ip);
-                    handled =1;
+                log_info("server", "proxying %s → %s:%d", req.path, app->name, app->port);
+                proxy_forward_cached(conn_fd, &req, app->port, client_ip);
+                handled = 1;
             }
         }
+        
 
         if (!handled && strcmp(req.method, "GET") == 0) {
             char filepath[MAX_PATH_LEN];
