@@ -1,3 +1,6 @@
+#define _POSIX_C_SOURCE 200809L
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +23,41 @@
 #include "event.h"
 #include "lb.h"
 #include "cache.h"
+#include <signal.h>
+#include <errno.h>
+
 
 #define KEEPALIVE_TIMEOUT_SEC  15
 #define MAX_REQUESTS_PER_CONN  100
 
 void router_set_start_time(void);
 static void handle_connection(int conn_fd, const char *client_ip);
+
+volatile sig_atomic_t g_running = 1;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    g_running = 0;
+}
+
+static void setup_signals(void) 
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    // SIGINT  = Ctrl+C
+    // SIGTERM = kill command / systemd stop
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    // SIGPIPE = write to closed socket
+
+    signal(SIGPIPE, SIG_IGN);
+}
 
 typedef struct {
     int conn_fd;
@@ -48,12 +80,13 @@ static void *connection_thread(void *arg) {
 
 int main(void) {
     lb_init();
-    cache_init();
     config_load("s1mple.conf");
     logger_init(g_config.log_file, g_config.log_level);
     config_print();
-
     registry_init();
+    cache_init();
+
+    setup_signals();
 
     int server_fd, conn_fd;
     struct sockaddr_in server_addr, client_addr;
@@ -94,11 +127,15 @@ int main(void) {
         event_loop_run(server_fd);
     } else {
         // original pthread model
-        while (1) {
+        while (g_running) {
             conn_fd = accept(server_fd,
                              (struct sockaddr *)&client_addr,
                              &client_len);
-            if (conn_fd < 0) { perror("accept"); continue; }
+            if (conn_fd < 0) { 
+                if (errno == EINTR) continue;
+                if(!g_running) break;
+                perror("accept"); 
+                continue; }
 
             char client_ip[INET_ADDRSTRLEN];
             strncpy(client_ip, inet_ntoa(client_addr.sin_addr),
@@ -140,8 +177,14 @@ int main(void) {
             pthread_detach(thread);
         }
     }
+
+    log_info("server", "shutting down...");
+
+    //kill all deployed apps
+    shutdown_registry();
     close(server_fd);
     logger_close();
+    log_info("server", "shutdown complete");
     return 0;
 
 }

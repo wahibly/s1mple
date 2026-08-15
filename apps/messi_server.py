@@ -2,6 +2,7 @@
 
 import os
 import sys
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -28,6 +29,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
+def handle_sigterm(sig, frame):
+    print(f"[messi_server] received SIGTERM, shutting down", flush=True)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+
 print(f"[messi_server.py] starting on port {PORT}", flush=True)
 httpserver = HTTPServer(('localhost', PORT), Handler)
 httpserver.serve_forever()
+

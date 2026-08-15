@@ -19,10 +19,13 @@
 #include "logger.h"
 #include "server_tcp.h"
 #include "lb.h"
+#include "signal.h"
+
 
 #define MAX_EVENTS       64      // max events per epoll_wait() call
 #define MAX_CONNS        4096    // max  connections simultany
 #define KEEPALIVE_SECS   15
+
 
 // Connection table (infex by fd)
 static conn_t *conn_table[MAX_CONNS];
@@ -452,16 +455,19 @@ void event_loop_run(int server_fd) {
 
     struct epoll_event events[MAX_EVENTS];
 
-    while (1) {
+    while (g_running) {
         // Block until at least one fd is ready.
         // Timeout of 15s, used to check for idle connections
         int nready = epoll_wait(epfd, events, MAX_EVENTS, KEEPALIVE_SECS * 1000);
 
         if (nready < 0) {
-            if (errno == EINTR) continue; 
-            log_error("event", "epoll_wait failed");
-            break;
-        }
+            if (errno == EINTR) {
+            if (!g_running) break; // signal received
+            continue;
+            }
+        log_error("event", "epoll_wait failed");
+        break;
+    }
 
         if (nready == 0) {
             // Timeout, no events in a full implementation we had
@@ -543,6 +549,6 @@ void event_loop_run(int server_fd) {
             }
         }
     }
-
+    log_info("event", "event loop stopped");
     close(epfd);
 }
