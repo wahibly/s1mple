@@ -194,3 +194,71 @@ int registry_undeploy(const char *name){
     pthread_mutex_unlock(&g_registry.lock);
     return -1; //not found
 }
+
+void shutdown_registry(void) {
+    pthread_mutex_lock(&g_registry.lock);
+
+    log_info("registry", "shutting down %d deployed apps",
+             g_registry.count);
+
+    // Send SIGTERM to all apps first
+    for (int i = 0; i < MAX_APPS; i++) {
+        if (!g_registry.apps[i].active) continue;
+        log_info("registry", "stopping '%s' (pid %d)",
+                 g_registry.apps[i].name,
+                 g_registry.apps[i].pid);
+        kill(g_registry.apps[i].pid, SIGTERM);
+    }
+
+    // Poll every 100ms for up to 3 seconds
+    // Use waitpid(WNOHANG) which both checks AND reaps zombies
+    for (int waited = 0; waited < 30; waited++) {
+        int all_dead = 1;
+
+        for (int i = 0; i < MAX_APPS; i++) {
+            if (!g_registry.apps[i].active) continue;
+
+            pid_t pid = g_registry.apps[i].pid;
+            int   status;
+
+            // WNOHANG = don't block, just check
+            // Returns pid if process exited, 0 if still running, -1 if error
+            pid_t result = waitpid(pid, &status, WNOHANG);
+
+            if (result == pid) {
+                // Process exited and reaped successfully
+                log_info("registry",
+                         "'%s' (pid %d) exited cleanly",
+                         g_registry.apps[i].name, pid);
+                memset(&g_registry.apps[i], 0, sizeof(app_entry_t));
+                g_registry.count--;
+            } else if (result == -1) {
+                // Process doesn't exist at all
+                log_debug("registry", "pid %d already gone", pid);
+                memset(&g_registry.apps[i], 0, sizeof(app_entry_t));
+                g_registry.count--;
+            } else {
+                // result == 0 — still running
+                all_dead = 0;
+            }
+        }
+
+        if (all_dead) break;
+        usleep(100000); // 100ms
+    }
+
+    // Force kill anything still alive after grace period
+    for (int i = 0; i < MAX_APPS; i++) {
+        if (!g_registry.apps[i].active) continue;
+
+        pid_t pid = g_registry.apps[i].pid;
+        log_warn("registry", "force killing pid %d", pid);
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0); // block until dead
+        memset(&g_registry.apps[i], 0, sizeof(app_entry_t));
+        g_registry.count--;
+    }
+
+    pthread_mutex_unlock(&g_registry.lock);
+    log_info("registry", "all apps stopped");
+}

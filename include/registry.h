@@ -38,4 +38,6 @@ int registry_undeploy(const char *name);
 
 extern app_registry_t g_registry; //global registry
 
+void shutdown_registry(void);
+
 #endif
